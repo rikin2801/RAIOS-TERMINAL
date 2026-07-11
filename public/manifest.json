@@ -1,0 +1,19 @@
+{
+  "name": "RAIOS — AI Investment Terminal",
+  "short_name": "RAIOS",
+  "description": "Personal AI Investment Operating System for Indian equity markets",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/globe.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
