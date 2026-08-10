@@ -76,7 +76,7 @@ export default function SearchPage() {
   }, [query]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Stock Search</h1>
         <p className="text-sm text-muted-foreground">Search by symbol, company name, or sector — click any result to view chart & signals</p>

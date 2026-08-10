@@ -224,7 +224,7 @@ export default function PortfolioManagerPage() {
     <div className="flex flex-col h-full">
 
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border bg-card/50 flex items-center justify-between">
+      <div className="px-4 py-4 border-b border-border bg-card/50 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Brain className="h-5 w-5 text-primary" />

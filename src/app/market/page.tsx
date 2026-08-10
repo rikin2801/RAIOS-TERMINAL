@@ -549,13 +549,13 @@ function MarketContent() {
   const [tab, setTab] = useState<"scanner" | "chart">(initialTab);
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Market Explorer</h1>
           <p className="text-xs text-muted-foreground">NSE · BSE · Real-time market data</p>
         </div>
-        <div className="flex gap-1 border border-border rounded-lg p-1">
+        <div className="flex gap-1 border border-border rounded-lg p-1 self-start">
           <button
             onClick={() => setTab("scanner")}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab === "scanner" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}

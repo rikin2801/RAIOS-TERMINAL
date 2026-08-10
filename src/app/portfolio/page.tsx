@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { HoldingForm } from "@/components/portfolio/holding-form";
 import { useToast } from "@/hooks/use-toast";
 import { usePortfolio, ALL_PORTFOLIOS_ID } from "@/contexts/portfolio-context";
-import { formatCurrency, formatPercent } from "@/lib/utils";
+import { formatCurrency, formatCurrencyCompact, formatPercent } from "@/lib/utils";
 import type { Holding, HoldingWithMarket, ImportHistory } from "@/types";
 import {
   Plus, Pencil, Trash2, Download, Upload,
@@ -521,9 +521,9 @@ export default function PortfolioPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Portfolio</h1>
           <p className="text-sm text-muted-foreground">
@@ -532,7 +532,7 @@ export default function PortfolioPage() {
               : `${activePortfolio?.name ?? "Default"} · ${holdings.length} holdings · NSE/BSE`}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap">
           {activeTab === "holdings" && activePortfolioId !== ALL_PORTFOLIOS_ID && (
             <>
               <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
@@ -567,9 +567,9 @@ export default function PortfolioPage() {
       {/* Summary Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: "Portfolio Value", value: formatCurrency(totalValue) },
-          { label: "Total Cost", value: formatCurrency(totalCost) },
-          { label: "Total Gain/Loss", value: formatCurrency(totalGL), pct: formatPercent(totalGLPct), positive: totalGL >= 0 },
+          { label: "Portfolio Value", value: formatCurrencyCompact(totalValue) },
+          { label: "Total Cost", value: formatCurrencyCompact(totalCost) },
+          { label: "Total Gain/Loss", value: formatCurrencyCompact(totalGL), pct: formatPercent(totalGLPct), positive: totalGL >= 0 },
           { label: "Holdings", value: holdings.length.toString() },
         ].map(({ label, value, pct, positive }) => (
           <div key={label} className="rounded-lg border border-border bg-card p-4">
