@@ -3,7 +3,7 @@ import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { resolvePortfolioId } from "@/lib/portfolio";
+import { holdingWhere } from "@/lib/portfolio";
 import { getQuote } from "@/lib/market";
 import type { Exchange } from "@/lib/india";
 
@@ -69,10 +69,13 @@ type EnrichedH = {
 };
 
 export async function GET(req: NextRequest) {
-  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  const quick = req.nextUrl.searchParams.get("quick") === "1";
-  const portfolioId = await resolvePortfolioId(req.nextUrl.searchParams.get("portfolioId"));
-  const holdings = await prisma.holding.findMany({ where: { portfolioId } });
+  const apiKey      = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  const quick       = req.nextUrl.searchParams.get("quick") === "1";
+  const force       = req.nextUrl.searchParams.get("force") === "1";
+  const rawId       = req.nextUrl.searchParams.get("portfolioId");
+  const portfolioId = rawId ?? "default";
+  const where       = await holdingWhere(rawId);
+  const holdings    = await prisma.holding.findMany({ where });
 
   if (holdings.length === 0) {
     return NextResponse.json({ error: "No holdings found. Add holdings first." }, { status: 400 });
@@ -112,7 +115,7 @@ export async function GET(req: NextRequest) {
   }
 
   const cached = _pmCache.get(portfolioId);
-  if (cached && Date.now() - cached.ts < PM_TTL_MS) {
+  if (!force && cached && Date.now() - cached.ts < PM_TTL_MS) {
     return NextResponse.json({ ...cached.data, source: "ai-cached" });
   }
 

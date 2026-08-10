@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolvePortfolioId } from "@/lib/portfolio";
+import { resolvePortfolioId, holdingWhere } from "@/lib/portfolio";
 import { z } from "zod";
 
 const HoldingSchema = z.object({
@@ -17,13 +17,9 @@ const HoldingSchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
-  const portfolioId = await resolvePortfolioId(
-    req.nextUrl.searchParams.get("portfolioId")
-  );
-  const holdings = await prisma.holding.findMany({
-    where: { portfolioId },
-    orderBy: { createdAt: "asc" },
-  });
+  const rawId = req.nextUrl.searchParams.get("portfolioId");
+  const where = await holdingWhere(rawId);
+  const holdings = await prisma.holding.findMany({ where, orderBy: { createdAt: "asc" } });
   return NextResponse.json(holdings);
 }
 

@@ -5,7 +5,8 @@ import { z } from "zod";
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(100),
-  broker: z.string().optional(),
+  familyGroup: z.string().max(50).optional(),
+  broker: z.string().max(100).optional(),
   description: z.string().optional(),
   isDefault: z.boolean().optional(),
 });
@@ -27,15 +28,20 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { name, broker, description, isDefault } = parsed.data;
+  const { name, familyGroup, broker, description, isDefault } = parsed.data;
 
   // If making this the default, unset others
   if (isDefault) {
     await prisma.portfolio.updateMany({ data: { isDefault: false } });
   }
 
-  const portfolio = await prisma.portfolio.create({
-    data: { name, broker, description, isDefault: isDefault ?? false },
-  });
-  return NextResponse.json(portfolio, { status: 201 });
+  try {
+    const portfolio = await prisma.portfolio.create({
+      data: { name, familyGroup: familyGroup || null, broker: broker || null, description, isDefault: isDefault ?? false },
+    });
+    return NextResponse.json(portfolio, { status: 201 });
+  } catch (err) {
+    console.error("[POST /api/portfolios] error:", err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
 }

@@ -1,6 +1,10 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketQuote } from "@/types";
 import { toYahooSymbol, fromYahooSymbol, type Exchange } from "./india";
+import {
+  calculateRSI, calculateMACD, calculateStochastic,
+  calculateSMA, findSupportResistance,
+} from "./technical";
 
 const yf = new YahooFinance();
 
@@ -166,6 +170,119 @@ export async function getChartData(
       close: q.close ?? 0,
       volume: q.volume ?? 0,
     }));
+}
+
+// ── Holding Technicals (for AI decision engine) ───────────────────────────────
+
+export interface HoldingTechnicals {
+  rsi: number;
+  macdHistogram: number;
+  stochasticK: number;
+  sma50: number;
+  sma200: number;
+  currentPrice: number;
+  support: number;
+  resistance: number;
+  // Derived labels
+  dailyTrend: "Bullish" | "Bearish" | "Neutral";
+  weeklyTrend: "Bullish" | "Bearish" | "Neutral";
+  monthlyTrend: "Bullish" | "Bearish" | "Neutral";
+  macdLabel: "Positive" | "Negative" | "Neutral";
+  stochasticLabel: "Strong" | "Weak" | "Neutral";
+  volumeLabel: "Strong" | "Weak" | "Average";
+  momentumLabel: "Strong" | "Weak" | "Neutral";
+  aboveSma50: boolean;
+  aboveSma200: boolean;
+}
+
+const _techCache = new Map<string, { data: HoldingTechnicals; ts: number }>();
+const TECH_TTL_MS = 15 * 60_000;
+
+export async function getHoldingTechnicals(
+  symbol: string,
+  exchange: Exchange = "NSE",
+): Promise<HoldingTechnicals | null> {
+  const key = `tech:${symbol}:${exchange}`;
+  const cached = _techCache.get(key);
+  if (cached && Date.now() - cached.ts < TECH_TTL_MS) return cached.data;
+
+  try {
+    const candles = await getHistoricalData(symbol, "1y", exchange, "DAILY");
+    if (candles.length < 50) return null;
+
+    const closes  = candles.map(c => c.close);
+    const highs   = candles.map(c => c.high);
+    const lows    = candles.map(c => c.low);
+    const volumes = candles.map(c => c.volume);
+    const price   = closes[closes.length - 1];
+    const vol     = volumes[volumes.length - 1];
+
+    const rsi = calculateRSI(closes);
+    const { histogram: macdH } = calculateMACD(closes);
+    const { k: stochK } = calculateStochastic(highs, lows, closes);
+    const sma10  = calculateSMA(closes, 10);
+    const sma20  = calculateSMA(closes, 20);
+    const sma30  = calculateSMA(closes, 30);
+    const sma50  = calculateSMA(closes, 50);
+    const sma150 = calculateSMA(closes, 150);
+    const sma200 = calculateSMA(closes, 200);
+    const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const { support, resistance } = findSupportResistance(highs, lows, closes);
+
+    // Daily: RSI + MACD direction + price vs SMA20
+    const dailyTrend: HoldingTechnicals["dailyTrend"] =
+      rsi > 52 && macdH > 0 && price > sma20 ? "Bullish" :
+      rsi < 48 && macdH < 0 && price < sma20 ? "Bearish" : "Neutral";
+
+    // Weekly proxy: SMA10 vs SMA30
+    const weeklyTrend: HoldingTechnicals["weeklyTrend"] =
+      price > sma10 && sma10 > sma30 ? "Bullish" :
+      price < sma10 && sma10 < sma30 ? "Bearish" : "Neutral";
+
+    // Monthly proxy: SMA50 vs SMA150
+    const monthlyTrend: HoldingTechnicals["monthlyTrend"] =
+      price > sma50 && sma50 > sma150 ? "Bullish" :
+      price < sma50 && sma50 < sma150 ? "Bearish" : "Neutral";
+
+    const macdLabel: HoldingTechnicals["macdLabel"] =
+      macdH > 0.5 ? "Positive" : macdH < -0.5 ? "Negative" : "Neutral";
+
+    const stochasticLabel: HoldingTechnicals["stochasticLabel"] =
+      stochK > 60 ? "Strong" : stochK < 40 ? "Weak" : "Neutral";
+
+    const volRatio = avgVol > 0 ? vol / avgVol : 1;
+    const volumeLabel: HoldingTechnicals["volumeLabel"] =
+      volRatio > 1.4 ? "Strong" : volRatio < 0.7 ? "Weak" : "Average";
+
+    const momentumLabel: HoldingTechnicals["momentumLabel"] =
+      rsi > 60 && macdH > 0 && price > sma50 ? "Strong" :
+      rsi < 40 || (macdH < 0 && price < sma50) ? "Weak" : "Neutral";
+
+    const data: HoldingTechnicals = {
+      rsi: Math.round(rsi),
+      macdHistogram: parseFloat(macdH.toFixed(4)),
+      stochasticK: Math.round(stochK),
+      sma50: Math.round(sma50),
+      sma200: Math.round(sma200),
+      currentPrice: price,
+      support: Math.round(support),
+      resistance: Math.round(resistance),
+      dailyTrend,
+      weeklyTrend,
+      monthlyTrend,
+      macdLabel,
+      stochasticLabel,
+      volumeLabel,
+      momentumLabel,
+      aboveSma50: price > sma50,
+      aboveSma200: price > sma200,
+    };
+
+    _techCache.set(key, { data, ts: Date.now() });
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 export async function getMultipleQuotes(symbols: string[]): Promise<MarketQuote[]> {

@@ -18,7 +18,7 @@ import type { OpportunitiesData } from "@/app/api/ai/opportunities/route";
 import type { DecisionData } from "@/app/api/ai/decision/route";
 import type { ForecastData } from "@/app/api/ai/forecast/route";
 import { resolveSearchSymbol } from "@/lib/india";
-import { usePortfolio } from "@/contexts/portfolio-context";
+import { usePortfolio, ALL_PORTFOLIOS_ID } from "@/contexts/portfolio-context";
 
 
 // ──────────────────────────── DAILY BRIEF ────────────────────────────
@@ -196,6 +196,12 @@ function OpportunitiesTab({ portfolioId }: { portfolioId: string }) {
     try {
       const url = portfolioId ? `/api/ai/opportunities?portfolioId=${portfolioId}` : "/api/ai/opportunities";
       const res = await fetch(url);
+      if (res.status === 429) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.message ?? "Gemini API rate limit reached. Please wait a few minutes and try again.");
+        setLoading(false);
+        return;
+      }
       if (!res.ok) throw new Error("Failed");
       setData(await res.json());
     } catch {
@@ -440,31 +446,28 @@ function DecisionTab({ portfolioId }: { portfolioId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // NEW SCHEMA — no cost-based fields, pure technical
 
   const baseUrl = portfolioId ? `/api/ai/decision?portfolioId=${portfolioId}` : "/api/ai/decision";
 
-  // Initial load: quick rule-based decisions (instant with cached quotes)
   const fetchQuick = async () => {
     setLoading(true); setError("");
     try {
       const res = await fetch(`${baseUrl}&quick=1`);
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed"); }
       const json = await res.json();
-      setData(json);
-      setSource(json.source ?? "rule-based");
+      setData(json); setSource(json.source ?? "rule-based");
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Failed"); }
     setLoading(false);
   };
 
-  // Refresh: full AI analysis via Gemini (user-initiated, takes ~30s)
   const fetchAI = async () => {
     setAiLoading(true); setError("");
     try {
       const res = await fetch(baseUrl);
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed"); }
       const json = await res.json();
-      setData(json);
-      setSource(json.source ?? "rule-based");
+      setData(json); setSource(json.source ?? "rule-based");
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Failed"); }
     setAiLoading(false);
   };
@@ -473,26 +476,28 @@ function DecisionTab({ portfolioId }: { portfolioId: string }) {
 
   const actionColor = (a: string) => {
     if (["BUY", "ACCUMULATE"].includes(a)) return "text-green-400 bg-green-400/10 border-green-400/30";
-    if (["SELL", "REDUCE"].includes(a)) return "text-red-400 bg-red-400/10 border-red-400/30";
-    if (["BOOK_PARTIAL_PROFIT"].includes(a)) return "text-orange-400 bg-orange-400/10 border-orange-400/30";
-    if (["WATCH", "WAIT"].includes(a)) return "text-blue-400 bg-blue-400/10 border-blue-400/30";
+    if (["SELL", "REDUCE_POSITION"].includes(a)) return "text-red-400 bg-red-400/10 border-red-400/30";
+    if (["BOOK_PARTIAL_PROFITS"].includes(a)) return "text-orange-400 bg-orange-400/10 border-orange-400/30";
+    if (["WAIT_AND_WATCH", "AVOID"].includes(a)) return "text-blue-400 bg-blue-400/10 border-blue-400/30";
     return "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
   };
-
-  const riskColor = (r: string) => r === "HIGH" ? "text-red-400" : r === "MEDIUM" ? "text-yellow-400" : "text-green-400";
-  const confidenceColor = (c: number) => c >= 75 ? "bg-green-400" : c >= 55 ? "bg-yellow-400" : "bg-red-400";
+  const confidenceBar = (c: number) => c >= 75 ? "bg-green-400" : c >= 55 ? "bg-yellow-400" : "bg-red-400";
+  const healthColor = (s: number) => s >= 80 ? "text-green-400" : s >= 65 ? "text-yellow-400" : "text-red-400";
+  const trendColor = (t: string) => t === "Bullish" ? "text-green-400" : t === "Bearish" ? "text-red-400" : "text-yellow-400";
+  const trendBg = (t: string) => t === "Bullish" ? "bg-green-400/10 border-green-400/30" : t === "Bearish" ? "bg-red-400/10 border-red-400/30" : "bg-yellow-400/10 border-yellow-400/30";
+  const sentimentColor = (s: string) => s === "BULLISH" ? "text-green-400" : s === "BEARISH" ? "text-red-400" : "text-yellow-400";
 
   const sourceLabel = source === "ai" ? "AI-Powered · Gemini 2.5 Flash"
-    : source === "ai-cached" ? "AI-Powered · Cached"
-    : "Rule-Based Analysis";
+    : source === "ai-cached" ? "AI-Powered · Cached" : "Rule-Based Analysis";
   const sourceDot = source === "ai" || source === "ai-cached" ? "bg-primary" : "bg-yellow-400";
 
   return (
     <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2"><Crosshair className="h-5 w-5 text-primary" /> AI Decision Engine</h2>
-          <p className="text-xs text-muted-foreground">What to do with each holding TODAY — with full reasoning · Click any stock to expand</p>
+          <p className="text-xs text-muted-foreground">Technical-only decisions · No cost basis logic · Click any stock for full analysis</p>
         </div>
         <div className="flex items-center gap-2">
           {source && (
@@ -501,11 +506,11 @@ function DecisionTab({ portfolioId }: { portfolioId: string }) {
               {sourceLabel}
             </span>
           )}
-          <Button variant="outline" size="sm" onClick={fetchQuick} disabled={loading || aiLoading} title="Refresh rule-based analysis">
+          <Button variant="outline" size="sm" onClick={fetchQuick} disabled={loading || aiLoading}>
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
           </Button>
-          <Button variant="default" size="sm" onClick={fetchAI} disabled={loading || aiLoading} title="Generate full AI analysis via Gemini (~30s)">
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${aiLoading ? "animate-spin" : ""}`} />
+          <Button variant="default" size="sm" onClick={fetchAI} disabled={loading || aiLoading}>
+            <Sparkles className={`h-3.5 w-3.5 mr-1.5 ${aiLoading ? "animate-spin" : ""}`} />
             {aiLoading ? "Thinking…" : "AI Analysis"}
           </Button>
         </div>
@@ -514,136 +519,255 @@ function DecisionTab({ portfolioId }: { portfolioId: string }) {
       {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive text-sm">{error}</div>}
       {aiLoading && (
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-primary flex items-center gap-2">
-          <RefreshCw className="h-3.5 w-3.5 animate-spin flex-shrink-0" />
-          Gemini is generating deep AI analysis for all holdings… this takes ~30 seconds. Results will replace current view when ready.
+          <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />
+          Gemini 2.5 Flash is running deep analysis across all holdings… ~30 seconds. Results will replace current view when ready.
         </div>
       )}
       {loading && (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <Crosshair className="h-12 w-12 text-primary animate-pulse" />
           <p className="text-muted-foreground">Fetching live prices and computing decisions…</p>
-          <p className="text-xs text-muted-foreground">Open individual stock charts for RSI / MACD / Stochastic signals</p>
         </div>
       )}
 
       {data && !loading && (
         <>
-          {/* Market Context */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground mb-1">Market Context · {data.date}</p>
-            <p className="text-sm leading-relaxed">{data.marketContext}</p>
+          {/* Market Context + Health */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 rounded-lg border border-border bg-card p-4">
+              <div className="flex items-start justify-between mb-2">
+                <p className="text-xs text-muted-foreground">{data.date}</p>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                  data.marketSentiment === "BULLISH" ? "text-green-400 bg-green-400/10 border-green-400/30" :
+                  data.marketSentiment === "BEARISH" ? "text-red-400 bg-red-400/10 border-red-400/30" :
+                  "text-yellow-400 bg-yellow-400/10 border-yellow-400/30"
+                }`}>{data.marketSentiment}</span>
+              </div>
+              <p className="text-sm leading-relaxed mb-3">{data.marketContext}</p>
+              {data.marketReasons.length > 0 && (
+                <ul className="space-y-1">
+                  {data.marketReasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className={`shrink-0 mt-0.5 ${sentimentColor(data.marketSentiment)}`}>•</span>
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4 flex flex-col justify-center items-center">
+              <p className="text-xs text-muted-foreground mb-2">Portfolio Health</p>
+              <span className={`text-4xl font-black font-mono ${healthColor(data.portfolioHealthScore)}`}>
+                {data.portfolioHealthScore}
+              </span>
+              <span className="text-xs text-muted-foreground">/100</span>
+              <div className="w-full h-2 bg-secondary rounded-full overflow-hidden mt-3">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    data.portfolioHealthScore >= 80 ? "bg-green-400" :
+                    data.portfolioHealthScore >= 65 ? "bg-yellow-400" : "bg-red-400"
+                  }`}
+                  style={{ width: `${data.portfolioHealthScore}%` }}
+                />
+              </div>
+            </div>
           </div>
 
-          {/* Top 3 highlights */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <div className="rounded-lg border border-green-900/40 bg-green-900/10 p-3">
-              <p className="text-xs font-bold text-green-400 mb-1.5 flex items-center gap-1"><Star className="h-3 w-3" /> TOP OPPORTUNITY</p>
-              <p className="font-mono font-bold">{data.topOpportunity.symbol}</p>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{data.topOpportunity.why}</p>
-              <div className="mt-1.5 flex items-center gap-1">
-                <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${confidenceColor(data.topOpportunity.confidence)}`} style={{ width: `${data.topOpportunity.confidence}%` }} />
+          {/* Top Opportunity + Biggest Risk */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {data.topOpportunity && (
+              <div className="rounded-lg border border-green-900/40 bg-green-900/10 p-4">
+                <p className="text-xs font-bold text-green-400 mb-2 flex items-center gap-1"><Star className="h-3 w-3" /> TOP OPPORTUNITY</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="font-mono font-bold text-lg">{data.topOpportunity.symbol}</p>
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${actionColor(data.topOpportunity.action)}`}>{data.topOpportunity.action}</span>
+                  <span className="ml-auto text-xs font-mono text-green-400">{data.topOpportunity.confidence}%</span>
                 </div>
-                <span className="text-xs font-mono text-green-400">{data.topOpportunity.confidence}%</span>
+                <ul className="space-y-1">
+                  {data.topOpportunity.reasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <span className="shrink-0 text-green-400 mt-0.5">▲</span>{r}
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
-            <div className="rounded-lg border border-red-900/40 bg-red-900/10 p-3">
-              <p className="text-xs font-bold text-red-400 mb-1.5 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> HIGHEST RISK</p>
-              <p className="font-mono font-bold">{data.highestRisk.symbol}</p>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{data.highestRisk.why}</p>
-            </div>
-            <div className="rounded-lg border border-yellow-900/40 bg-yellow-900/10 p-3">
-              <p className="text-xs font-bold text-yellow-400 mb-1.5 flex items-center gap-1"><Zap className="h-3 w-3" /> HIGHEST CONVICTION</p>
-              <div className="flex items-center gap-2">
-                <p className="font-mono font-bold">{data.highestConviction.symbol}</p>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${actionColor(data.highestConviction.action)}`}>{data.highestConviction.action.replace(/_/g, " ")}</span>
+            )}
+            {data.biggestRisk && (
+              <div className="rounded-lg border border-red-900/40 bg-red-900/10 p-4">
+                <p className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> BIGGEST RISK</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="font-mono font-bold text-lg">{data.biggestRisk.symbol}</p>
+                  <span className="ml-auto text-xs font-mono text-red-400">{data.biggestRisk.confidence}% risk</span>
+                </div>
+                <ul className="space-y-1">
+                  {data.biggestRisk.reasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <span className="shrink-0 text-red-400 mt-0.5">▼</span>{r}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{data.highestConviction.why}</p>
-              <p className="text-xs font-mono text-yellow-400 mt-1">{data.highestConviction.confidence}% confidence</p>
-            </div>
+            )}
           </div>
+
+          {/* Attention Required */}
+          {data.attentionRequired.length > 0 && (
+            <div className="rounded-lg border border-orange-900/40 bg-orange-900/5 p-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2 mb-3 text-orange-400">
+                <AlertTriangle className="h-4 w-4" /> Requires Attention ({data.attentionRequired.length})
+              </h3>
+              <div className="space-y-2">
+                {data.attentionRequired.map((a) => (
+                  <div key={a.symbol} className="rounded-lg border border-orange-900/30 bg-orange-900/10 p-3">
+                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${actionColor(a.action)}`}>{a.action.replace(/_/g, " ")}</span>
+                      <span className="font-mono font-bold">{a.symbol}</span>
+                      <Badge variant="outline" className={`shrink-0 text-xs ml-auto ${a.urgency === "URGENT" ? "border-red-500 text-red-400" : "border-orange-500 text-orange-400"}`}>{a.urgency}</Badge>
+                    </div>
+                    <ul className="space-y-0.5">
+                      {a.reasons.slice(0, 2).map((r, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                          <span className="shrink-0 text-orange-400 mt-0.5">•</span>{r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Today's Decisions — expandable cards */}
           <div className="rounded-lg border border-border bg-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
-              <h3 className="font-semibold flex items-center gap-2"><Zap className="h-4 w-4 text-primary" /> Today&apos;s Action Plan</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Click any row to see full reasoning — Why · Why now · What could change it</p>
+              <h3 className="font-semibold flex items-center gap-2"><BarChart2 className="h-4 w-4 text-primary" /> Stock-by-Stock Decisions</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Click any row to see full technical breakdown</p>
             </div>
             <div className="divide-y divide-border">
               {data.todayDecisions.map((d) => {
                 const isOpen = expanded[d.symbol];
+                const isEntry = ["BUY", "ACCUMULATE"].includes(d.action);
+                const isExit = ["SELL", "REDUCE_POSITION", "BOOK_PARTIAL_PROFITS"].includes(d.action);
                 return (
                   <div key={d.symbol}>
                     <button
                       className="w-full text-left px-4 py-3 hover:bg-accent/30 transition-colors"
                       onClick={() => setExpanded(p => ({ ...p, [d.symbol]: !p[d.symbol] }))}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded border font-mono whitespace-nowrap ${actionColor(d.action)}`}>
                           {d.action.replace(/_/g, " ")}
                         </span>
                         <span className="font-mono font-bold text-sm">{d.symbol}</span>
-                        <span className="text-xs text-muted-foreground">{d.priceLevel}</span>
-                        <Badge variant="outline" className={`text-[10px] ${d.analysisTimeframe === "WEEKLY" ? "text-blue-400 border-blue-500/40" : d.analysisTimeframe === "MONTHLY" ? "text-purple-400 border-purple-500/40" : "border-border text-muted-foreground"}`}>
-                          {d.analysisTimeframe}
-                        </Badge>
-                        <div className="flex-1 mx-2 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <div className="flex-1 max-w-[80px] h-1 bg-secondary rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${confidenceColor(d.confidence ?? 60)}`} style={{ width: `${d.confidence ?? 60}%` }} />
-                            </div>
-                            <span className="text-[10px] text-muted-foreground font-mono">{d.confidence ?? 60}%</span>
+                        <span className="flex-1" />
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-16 h-1.5 bg-secondary rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${confidenceBar(d.confidence)}`} style={{ width: `${d.confidence}%` }} />
                           </div>
+                          <span className="text-xs font-mono text-muted-foreground">{d.confidence}%</span>
                         </div>
                         <Badge variant="outline" className={`shrink-0 text-xs ${d.urgency === "URGENT" || d.urgency === "HIGH" ? "border-red-500 text-red-400" : d.urgency === "MEDIUM" ? "border-yellow-500 text-yellow-400" : "border-border"}`}>
                           {d.urgency}
                         </Badge>
                         <span className={`text-[10px] shrink-0 ${isOpen ? "rotate-180" : ""} transition-transform text-muted-foreground`}>▼</span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1.5 ml-0 leading-relaxed">{d.reason}</p>
+                      <p className="text-sm font-medium text-foreground/90 mt-1.5 leading-relaxed line-clamp-2">{d.finalVerdict}</p>
                     </button>
 
                     {isOpen && (
-                      <div className="px-4 pb-4 bg-accent/20 border-t border-border/50 space-y-3">
-                        {/* Technical Signal — decision first */}
-                        <div className="pt-3">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Technical Signals</p>
-                          <p className="text-xs font-mono leading-relaxed text-foreground/80">{d.technicalSignal}</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          {/* Portfolio Context */}
-                          <div className="rounded-lg border border-border bg-card/50 p-3">
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Your Position</p>
-                            <p className="text-xs">{d.portfolioContext}</p>
-                            {d.expectedReward && (
-                              <p className="text-xs text-green-400 mt-1">Expected: {d.expectedReward}</p>
-                            )}
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[10px] text-muted-foreground">Risk:</span>
-                              <span className={`text-[10px] font-bold ${riskColor(d.riskLevel ?? "MEDIUM")}`}>{d.riskLevel}</span>
-                              <span className="text-[10px] text-muted-foreground ml-2">Hold:</span>
-                              <span className="text-[10px]">{d.holdingPeriod}</span>
-                            </div>
-                          </div>
-
-                          {/* Why Now */}
-                          <div className="rounded-lg border border-border bg-card/50 p-3">
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Why Now?</p>
-                            <p className="text-xs leading-relaxed">{d.whyNow}</p>
-                          </div>
-                        </div>
-
-                        {/* What could invalidate */}
-                        <div className="rounded-lg border border-yellow-900/30 bg-yellow-900/10 p-3">
-                          <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-wide mb-1">What would change this recommendation?</p>
-                          <p className="text-xs leading-relaxed text-foreground/80">{d.whatCouldInvalidate}</p>
-                        </div>
-
+                      <div className="px-4 pb-5 bg-accent/20 border-t border-border/50 space-y-4 pt-4">
                         {/* Final Verdict */}
-                        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-                          <p className="text-[10px] font-bold text-primary uppercase tracking-wide mb-1">AI Verdict</p>
-                          <p className="text-sm font-medium leading-relaxed">{d.finalVerdict}</p>
+                        <div className={`rounded-lg border-l-4 p-4 ${
+                          isEntry ? "border-l-green-500 bg-green-900/10 border border-green-900/30"
+                          : isExit ? "border-l-red-500 bg-red-900/10 border border-red-900/30"
+                          : "border-l-primary bg-primary/5 border border-primary/20"
+                        }`}>
+                          <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5 ${isEntry ? "text-green-400" : isExit ? "text-red-400" : "text-primary"}`}>
+                            <Crosshair className="h-3 w-3" /> Final Decision
+                          </p>
+                          <p className="text-base font-semibold leading-relaxed">{d.finalVerdict}</p>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border/40">
+                            <span>Confidence</span>
+                            <div className="w-20 h-1.5 bg-secondary rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${confidenceBar(d.confidence)}`} style={{ width: `${d.confidence}%` }} />
+                            </div>
+                            <span className="font-mono font-bold">{d.confidence}%</span>
+                          </div>
+                        </div>
+
+                        {/* Technical Snapshot */}
+                        <div className="rounded-lg border border-border bg-card/60 p-3">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-3">Technical Signals</p>
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            {[
+                              { label: "Daily Trend", val: d.technical.dailyTrend },
+                              { label: "Weekly Trend", val: d.technical.weeklyTrend },
+                              { label: "Monthly Trend", val: d.technical.monthlyTrend },
+                            ].map(({ label, val }) => (
+                              <div key={label} className={`rounded p-2 border ${trendBg(val)} text-center`}>
+                                <p className="text-[10px] text-muted-foreground">{label}</p>
+                                <p className={`text-xs font-bold mt-0.5 ${trendColor(val)}`}>{val}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {[
+                              { label: "RSI", val: `${d.technical.rsi}` },
+                              { label: "MACD", val: d.technical.macd },
+                              { label: "Stochastic", val: d.technical.stochastic },
+                              { label: "Volume", val: d.technical.volume },
+                              { label: "Momentum", val: d.technical.momentum },
+                              { label: "vs SMA50", val: d.technical.aboveSma50 ? "Above ✓" : "Below ✗" },
+                              { label: "vs SMA200", val: d.technical.aboveSma200 ? "Above ✓" : "Below ✗" },
+                              ...(d.technical.support ? [{ label: "Support", val: `₹${d.technical.support.toFixed(0)}` }] : []),
+                            ].map(({ label, val }) => (
+                              <div key={label} className="rounded p-2 bg-secondary/40">
+                                <p className="text-[10px] text-muted-foreground">{label}</p>
+                                <p className={`text-xs font-bold mt-0.5 ${
+                                  val.includes("✓") || val === "Bullish" || val === "Positive" || val === "Strong" ? "text-green-400" :
+                                  val.includes("✗") || val === "Bearish" || val === "Negative" || val === "Weak" ? "text-red-400" :
+                                  "text-foreground"
+                                }`}>{val}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Reasons */}
+                        <div className="rounded-lg border border-border bg-card/60 p-3">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Why This Decision</p>
+                          <ul className="space-y-1.5">
+                            {d.reasons.map((r, i) => (
+                              <li key={i} className="flex items-start gap-2 text-xs leading-relaxed">
+                                <span className={`shrink-0 mt-0.5 ${isEntry ? "text-green-400" : isExit ? "text-red-400" : "text-primary"}`}>•</span>
+                                {r}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {/* Risks + Watch For */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-red-900/30 bg-red-900/5 p-3">
+                            <p className="text-[10px] font-bold text-red-400 uppercase tracking-wide mb-2">Risks to Watch</p>
+                            <ul className="space-y-1">
+                              {d.risks.map((r, i) => (
+                                <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                                  <span className="shrink-0 text-red-400 mt-0.5">!</span>{r}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                            <p className="text-[10px] font-bold text-primary uppercase tracking-wide mb-2">Watch For</p>
+                            <ul className="space-y-1">
+                              {d.watchFor.map((w, i) => (
+                                <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                                  <span className="shrink-0 text-primary mt-0.5">→</span>{w}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -652,93 +776,6 @@ function DecisionTab({ portfolioId }: { portfolioId: string }) {
               })}
             </div>
           </div>
-
-          {/* High Conviction + Alerts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="font-semibold mb-3 flex items-center gap-2 text-sm"><Star className="h-4 w-4 text-yellow-400" /><span className="text-yellow-400">High Conviction Plays</span></h3>
-              <div className="space-y-3">
-                {data.highConviction.map((h) => (
-                  <div key={h.symbol} className={`rounded-lg p-3 border ${h.direction === "LONG" ? "border-green-900/40 bg-green-900/10" : "border-red-900/40 bg-red-900/10"}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold">{h.symbol}</span>
-                      <Badge variant="outline" className={h.direction === "LONG" ? "text-green-400 border-green-500/40" : "text-red-400 border-red-500/40"}>{h.direction}</Badge>
-                    </div>
-                    <p className="text-xs mt-1 leading-relaxed">{h.why}</p>
-                    <div className="flex gap-3 mt-1.5 text-xs text-muted-foreground">
-                      <span>Confidence: <span className="font-mono font-bold">{h.confidence}%</span></span>
-                      <span>· {h.timeframe}</span>
-                    </div>
-                    <p className="text-xs text-primary mt-1">Catalyst: {h.catalyst}</p>
-                  </div>
-                ))}
-                {data.highConviction.length === 0 && <p className="text-xs text-muted-foreground">No high-conviction trades today. Maintain existing positions.</p>}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {data.alerts.nearStopLoss.length > 0 && (
-                <div className="rounded-lg border border-red-900/40 bg-red-900/10 p-4">
-                  <h3 className="font-semibold mb-3 flex items-center gap-2 text-red-400 text-sm"><AlertTriangle className="h-4 w-4" /> Near Stop Loss</h3>
-                  <div className="space-y-2">
-                    {data.alerts.nearStopLoss.map((a) => (
-                      <div key={a.symbol} className="border-b border-red-900/20 pb-2 last:border-0 last:pb-0">
-                        <div className="flex justify-between">
-                          <span className="font-mono font-bold text-red-400">{a.symbol}</span>
-                          <span className="text-xs font-mono text-red-400">{a.distancePct.toFixed(1)}% above SL</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">CMP: ₹{a.currentPrice.toFixed(0)} | SL: ₹{a.stopLoss.toFixed(0)}</p>
-                        <p className="text-xs mt-0.5 leading-relaxed">{a.action}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {data.alerts.nearTarget.length > 0 && (
-                <div className="rounded-lg border border-green-900/40 bg-green-900/10 p-4">
-                  <h3 className="font-semibold mb-3 flex items-center gap-2 text-green-400 text-sm"><Target className="h-4 w-4" /> Near Target</h3>
-                  <div className="space-y-2">
-                    {data.alerts.nearTarget.map((a) => (
-                      <div key={a.symbol} className="border-b border-green-900/20 pb-2 last:border-0 last:pb-0">
-                        <div className="flex justify-between">
-                          <span className="font-mono font-bold text-green-400">{a.symbol}</span>
-                          <span className="text-xs font-mono text-green-400">{a.distancePct.toFixed(1)}% to target</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">CMP: ₹{a.currentPrice.toFixed(0)} | Target: ₹{a.target.toFixed(0)}</p>
-                        <p className="text-xs mt-0.5 leading-relaxed">{a.action}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {data.alerts.nearStopLoss.length === 0 && data.alerts.nearTarget.length === 0 && (
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-xs text-green-400 font-medium">✓ No critical alerts</p>
-                  <p className="text-xs text-muted-foreground mt-1">All positions within normal ranges — no stop-loss or target triggers today.</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Strengths + Weaknesses */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-lg border border-green-900/30 bg-green-900/10 p-4">
-              <h3 className="font-semibold text-green-400 flex items-center gap-2 mb-3 text-sm"><CheckCircle className="h-4 w-4" /> Portfolio Strengths</h3>
-              <ul className="space-y-1.5">{data.portfolioStrengths.map((s, i) => <li key={i} className="flex items-start gap-2 text-sm"><span className="text-green-400 mt-0.5 shrink-0">▲</span>{s}</li>)}</ul>
-            </div>
-            <div className="rounded-lg border border-red-900/30 bg-red-900/10 p-4">
-              <h3 className="font-semibold text-red-400 flex items-center gap-2 mb-3 text-sm"><XCircle className="h-4 w-4" /> Portfolio Weaknesses</h3>
-              <ul className="space-y-1.5">{data.portfolioWeaknesses.map((w, i) => <li key={i} className="flex items-start gap-2 text-sm"><span className="text-red-400 mt-0.5 shrink-0">▼</span>{w}</li>)}</ul>
-            </div>
-          </div>
-
-          {/* Weekly Plan */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="font-semibold mb-2 text-sm flex items-center gap-2"><Calendar className="h-4 w-4 text-primary" /> Weekly Action Plan</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">{data.weeklyPlan}</p>
-          </div>
-
-          <p className="text-xs text-muted-foreground text-center">{data.disclaimer}</p>
         </>
       )}
     </div>
@@ -946,11 +983,24 @@ function AIContent() {
         ))}
       </div>
 
-      {tab === "brief"             && <BriefTab             portfolioId={pid} />}
-      {tab === "opportunities"     && <OpportunitiesTab     portfolioId={pid} />}
-      {tab === "decision"          && <DecisionTab          portfolioId={pid} />}
-      {tab === "forecast"          && <ForecastTab />}
-      {tab === "chat"              && <ChatTab />}
+      {(tab === "brief" || tab === "opportunities" || tab === "decision") && activePortfolioId === ALL_PORTFOLIOS_ID
+        ? (
+          <div className="bg-card border border-border rounded-lg p-8 text-center max-w-lg mx-auto mt-4">
+            <Brain className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+            <h2 className="text-base font-semibold mb-1">Select a Portfolio</h2>
+            <p className="text-sm text-muted-foreground">This tab analyses one portfolio at a time. Switch to a specific portfolio from the sidebar.</p>
+          </div>
+        )
+        : (
+          <>
+            {tab === "brief"         && <BriefTab         portfolioId={pid} />}
+            {tab === "opportunities" && <OpportunitiesTab portfolioId={pid} />}
+            {tab === "decision"      && <DecisionTab      portfolioId={pid} />}
+            {tab === "forecast"      && <ForecastTab />}
+            {tab === "chat"          && <ChatTab />}
+          </>
+        )
+      }
     </div>
   );
 }

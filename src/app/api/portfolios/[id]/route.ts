@@ -4,8 +4,9 @@ import { z } from "zod";
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  broker: z.string().optional(),
-  description: z.string().optional(),
+  familyGroup: z.string().max(50).nullable().optional(),
+  broker: z.string().max(100).nullable().optional(),
+  description: z.string().nullable().optional(),
   isDefault: z.boolean().optional(),
 });
 

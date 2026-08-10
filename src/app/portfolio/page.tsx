@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HoldingForm } from "@/components/portfolio/holding-form";
 import { useToast } from "@/hooks/use-toast";
-import { usePortfolio } from "@/contexts/portfolio-context";
+import { usePortfolio, ALL_PORTFOLIOS_ID } from "@/contexts/portfolio-context";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import type { Holding, HoldingWithMarket, ImportHistory } from "@/types";
 import {
@@ -65,12 +65,34 @@ export default function PortfolioPage() {
   const brokerFileRef = useRef<HTMLInputElement>(null);
 
   const fetchHoldings = useCallback(async () => {
-    const pid = activePortfolioId ?? "";
-    const url = pid ? `/api/holdings?portfolioId=${pid}` : "/api/holdings";
-    const res = await fetch(url);
-    const data = await res.json();
-    setHoldings(data);
-    setLoading(false);
+    setLoading(true);
+    try {
+      if (activePortfolioId === ALL_PORTFOLIOS_ID) {
+        // Fetch all holdings across every portfolio and merge duplicates by weighted avg cost
+        const res = await fetch("/api/holdings?portfolioId=__ALL__");
+        const all: Holding[] = await res.json();
+        const merged = new Map<string, Holding>();
+        for (const h of all) {
+          const existing = merged.get(h.symbol);
+          if (!existing) {
+            merged.set(h.symbol, { ...h });
+          } else {
+            const totalShares = existing.shares + h.shares;
+            const avgCost = (existing.avgCost * existing.shares + h.avgCost * h.shares) / totalShares;
+            merged.set(h.symbol, { ...existing, shares: totalShares, avgCost });
+          }
+        }
+        setHoldings(Array.from(merged.values()));
+      } else {
+        const pid = activePortfolioId ?? "";
+        const url = pid ? `/api/holdings?portfolioId=${pid}` : "/api/holdings";
+        const res = await fetch(url);
+        const data = await res.json();
+        setHoldings(data);
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [activePortfolioId]);
 
   const fetchImportHistory = useCallback(async () => {
@@ -467,6 +489,28 @@ export default function PortfolioPage() {
     e.target.value = "";
   };
 
+  const alertedSymbols = useRef<Set<string>>(new Set());
+
+  // Fire a toast when any holding moves ±3% intraday
+  useEffect(() => {
+    if (!quotes || Object.keys(quotes).length === 0) return;
+    for (const h of holdings) {
+      const q = quotes[h.symbol];
+      if (!q) continue;
+      const pct = q.changePercent;
+      if (Math.abs(pct) < 3) continue;
+      const key = `${h.symbol}_${pct > 0 ? "up" : "down"}`;
+      if (alertedSymbols.current.has(key)) continue;
+      alertedSymbols.current.add(key);
+      const dir = pct > 0 ? "UP" : "DOWN";
+      toast({
+        title: `${h.symbol} ${dir} ${Math.abs(pct).toFixed(2)}% today`,
+        description: `${h.name} · Current: ${formatCurrency(q.price)}`,
+        variant: pct < 0 ? "destructive" : "default",
+      });
+    }
+  }, [quotes, holdings, toast]);
+
   const csvRef = useRef<HTMLInputElement>(null);
   const xlsxRef = useRef<HTMLInputElement>(null);
 
@@ -483,11 +527,13 @@ export default function PortfolioPage() {
         <div>
           <h1 className="text-2xl font-bold">Portfolio</h1>
           <p className="text-sm text-muted-foreground">
-            {activePortfolio?.name ?? "Default"} · {holdings.length} holdings · NSE/BSE
+            {activePortfolioId === ALL_PORTFOLIOS_ID
+              ? `All Portfolios · ${holdings.length} holdings (merged) · NSE/BSE`
+              : `${activePortfolio?.name ?? "Default"} · ${holdings.length} holdings · NSE/BSE`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {activeTab === "holdings" && (
+          {activeTab === "holdings" && activePortfolioId !== ALL_PORTFOLIOS_ID && (
             <>
               <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
                 <FileSpreadsheet className="h-4 w-4" /> Template
@@ -538,10 +584,13 @@ export default function PortfolioPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border pb-0">
-        {(["holdings", "import", "history"] as const).map((tab) => (
+        {(activePortfolioId === ALL_PORTFOLIOS_ID
+          ? ["holdings"] as const
+          : ["holdings", "import", "history"] as const
+        ).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => setActiveTab(tab as typeof activeTab)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
               activeTab === tab
                 ? "border-primary text-primary"
@@ -555,6 +604,11 @@ export default function PortfolioPage() {
             ) : "Holdings"}
           </button>
         ))}
+        {activePortfolioId === ALL_PORTFOLIOS_ID && (
+          <span className="ml-auto self-center text-[10px] text-muted-foreground px-2">
+            Read-only · duplicate stocks merged by weighted avg cost
+          </span>
+        )}
       </div>
 
       {/* Tab: Holdings */}
@@ -639,14 +693,16 @@ export default function PortfolioPage() {
                           {h.sector && <Badge variant="outline" className="text-xs">{h.sector}</Badge>}
                         </td>
                         <td className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditTarget(h)}>
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => handleDelete(h.id, h.symbol)}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+                          {activePortfolioId !== ALL_PORTFOLIOS_ID && (
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditTarget(h)}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => handleDelete(h.id, h.symbol)}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
                         </td>
                       </tr>,
                     ];

@@ -59,6 +59,13 @@ ${portfolioContext}`;
     return NextResponse.json({ reply: text });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "AI error";
+    const isQuota = msg.includes("quota") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
+    if (isQuota) {
+      return NextResponse.json(
+        { quota: true, error: "Gemini free-tier daily quota exhausted. Quota resets at midnight Pacific time (~12:30 PM IST next day). You can add billing in Google AI Studio for unlimited access." },
+        { status: 429 }
+      );
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

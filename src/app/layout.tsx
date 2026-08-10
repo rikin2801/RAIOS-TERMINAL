@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
+import { MobileHeader } from "@/components/layout/mobile-header";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { MarketBar } from "@/components/layout/market-bar";
 import { Toaster } from "@/components/ui/toaster";
 import { PortfolioProvider } from "@/contexts/portfolio-context";
@@ -23,11 +25,13 @@ export default function RootLayout({
         <PortfolioProvider>
           <Sidebar />
           <div className="flex-1 flex flex-col overflow-hidden">
+            <MobileHeader />
             <MarketBar />
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 overflow-auto pb-16 md:pb-0">
               {children}
             </main>
           </div>
+          <MobileBottomNav />
           <Toaster />
           <SwRegister />
         </PortfolioProvider>

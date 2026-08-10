@@ -109,53 +109,66 @@ Focus on the Indian market context. All prices in ₹. Be specific and actionabl
     });
     return NextResponse.json(object);
   } catch (err) {
+    const errMsg = String(err);
     console.error("Opportunity generation failed:", err);
+    if (errMsg.includes("429") || errMsg.toLowerCase().includes("rate") || errMsg.toLowerCase().includes("quota") || errMsg.toLowerCase().includes("resource_exhausted")) {
+      return NextResponse.json(
+        { error: "rate_limit", message: "Gemini API rate limit reached. Please wait a few minutes and try again." },
+        { status: 429 }
+      );
+    }
     return NextResponse.json(getMockOpportunities(quoteSummary));
   }
 }
 
 function getMockOpportunities(quotes: { symbol: string; name: string; price: number; changePercent: number; pe: number | undefined; pctFrom52wHigh: string }[]): OpportunitiesData {
-  const gainers = [...quotes].sort((a, b) => b.changePercent - a.changePercent).slice(0, 3);
-  const losers = [...quotes].sort((a, b) => a.changePercent - b.changePercent).slice(0, 2);
+  const sorted = [...quotes].sort((a, b) => b.changePercent - a.changePercent);
+  const topGainers = sorted.slice(0, 5);       // ranks 1–5: top buys
+  const swingCandidates = sorted.slice(5, 8);  // ranks 6–8: swing trades (different stocks)
+  const momentum = sorted.slice(0, 3);          // ranks 1–3: momentum leaders
+  const midTier = sorted.slice(8, 11);          // ranks 9–11: hidden gems (moderate movers)
+  const losers = sorted.slice(-2);              // bottom 2: avoid list
   const today = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
 
   return {
     generatedAt: today,
-    topBuys: gainers.map((q, i) => ({
+    topBuys: topGainers.map((q, i) => ({
       rank: i + 1,
       symbol: q.symbol,
       name: q.name,
       price: `₹${q.price.toFixed(2)}`,
       target: `₹${(q.price * 1.15).toFixed(2)}`,
       upside: "15%",
-      why: `Strong fundamentals and positive momentum. Technical setup suggests continued upside. Add Gemini API key for real AI analysis.`,
+      why: `Showing relative strength today. Technical setup suggests continued upside. Enable Gemini AI in Settings for real analysis.`,
       risk: "Market volatility, sector rotation risk",
       timeframe: "6-12 months",
       conviction: i === 0 ? "HIGH" : "MEDIUM",
     })),
-    swingTrades: gainers.slice(0, 3).map((q) => ({
+    swingTrades: swingCandidates.map((q) => ({
       symbol: q.symbol,
       name: q.name,
       entry: `₹${(q.price * 0.99).toFixed(2)} - ₹${(q.price * 1.01).toFixed(2)}`,
       target: `₹${(q.price * 1.06).toFixed(2)}`,
       stopLoss: `₹${(q.price * 0.96).toFixed(2)}`,
-      why: "Short-term momentum play. Looking for 5-7% gain over 2-3 weeks.",
+      why: "Short-term momentum candidate. Enable Gemini AI for real swing trade reasoning.",
       duration: "2-3 weeks",
     })),
-    momentumLeaders: gainers.map((q) => ({
+    momentumLeaders: momentum.map((q) => ({
       symbol: q.symbol,
       name: q.name,
-      why: "Outperforming peers on positive price action and volume.",
+      why: "Outperforming the market on price and volume today.",
       momentum: q.changePercent > 0 ? `+${q.changePercent.toFixed(2)}% today` : `${q.changePercent.toFixed(2)}% today`,
     })),
-    hiddenGems: [
-      { symbol: "PERSISTENT", name: "Persistent Systems", why: "Strong order book growth. Under-owned midcap IT.", catalyst: "AI/cloud deal wins, margin expansion" },
-      { symbol: "VOLTAS", name: "Voltas Ltd", why: "Summer demand catalyst. Market leader in ACs.", catalyst: "Seasonal demand pickup, new product launches" },
-    ],
+    hiddenGems: midTier.slice(0, 2).map((q) => ({
+      symbol: q.symbol,
+      name: q.name,
+      why: "Moderate mover with potential. Enable Gemini AI for real hidden gem analysis.",
+      catalyst: "Enable Gemini AI in Settings for catalyst analysis",
+    })),
     avoidList: losers.map((q) => ({
       symbol: q.symbol,
-      reason: `Underperforming with ${q.changePercent.toFixed(2)}% move. Wait for stabilization. Add Gemini API for real AI reasoning.`,
+      reason: `Underperforming today (${q.changePercent.toFixed(2)}%). Wait for stabilization before entering.`,
     })),
-    marketOutlook: "Indian markets remain resilient supported by strong domestic flows. Watch for RBI policy decisions and Q4 earnings season. FII activity and crude oil are key near-term drivers. Add your Gemini API key in Settings for real AI market analysis.",
+    marketOutlook: "Indian markets showing mixed signals. Enable Gemini AI in Settings for real-time market outlook and actionable insights.",
   };
 }

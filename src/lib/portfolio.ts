@@ -1,14 +1,35 @@
 import { prisma } from "@/lib/prisma";
 
+export const FAMILY_PREFIX = "__FAMILY__";
+export const BROKER_PREFIX = "__BROKER__";
+
 export type PortfolioRecord = {
   id: string;
   name: string;
+  familyGroup: string | null;
   broker: string | null;
   description: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
+
+// Returns a Prisma where clause for filtering holdings by any selector ID,
+// including virtual combined IDs (__ALL__, __FAMILY__xxx, __BROKER__xxx).
+export async function holdingWhere(rawId: string | null) {
+  if (rawId === "__ALL__") return {};
+  if (rawId?.startsWith(FAMILY_PREFIX)) {
+    const family = rawId.slice(FAMILY_PREFIX.length);
+    const ps = await prisma.portfolio.findMany({ where: { familyGroup: family }, select: { id: true } });
+    return { portfolioId: { in: ps.map(p => p.id) } };
+  }
+  if (rawId?.startsWith(BROKER_PREFIX)) {
+    const broker = rawId.slice(BROKER_PREFIX.length);
+    const ps = await prisma.portfolio.findMany({ where: { broker }, select: { id: true } });
+    return { portfolioId: { in: ps.map(p => p.id) } };
+  }
+  return { portfolioId: await resolvePortfolioId(rawId) };
+}
 
 // Returns the default portfolio, creating it if none exists.
 // Also backfills any holdings/watchlists with no portfolioId.

@@ -98,8 +98,13 @@ function FundRow({ label, value }: { label: string; value?: string | number | nu
 function AnalysisContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [symbol, setSymbol] = useState(searchParams.get("symbol") ?? "RELIANCE");
-  const [inputVal, setInputVal] = useState(searchParams.get("symbol") ?? "RELIANCE");
+  const [symbol, setSymbol] = useState<string>(() => {
+    const url = searchParams.get("symbol");
+    if (url) return url;
+    if (typeof window !== "undefined") return localStorage.getItem("raios_last_analysis") ?? "";
+    return "";
+  });
+  const [inputVal, setInputVal] = useState(symbol);
   const [quote, setQuote] = useState<MarketQuote | null>(null);
   const [technicals, setTechnicals] = useState<TechnicalIndicators | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalData | null>(null);
@@ -130,6 +135,7 @@ function AnalysisContent() {
       setTechnicals(data.indicators);
       setFundamentals(data.fundamentals);
       router.replace(`/analysis?symbol=${sym}`);
+      if (typeof window !== "undefined") localStorage.setItem("raios_last_analysis", sym);
     } catch {
       setError(`Could not load data for "${sym}". Check if the NSE ticker is correct.`);
     } finally {
@@ -137,7 +143,7 @@ function AnalysisContent() {
     }
   };
 
-  useEffect(() => { fetchAnalysis(symbol); }, [symbol]);
+  useEffect(() => { if (symbol) fetchAnalysis(symbol); }, [symbol]);
 
   const handleInputChange = (val: string) => {
     setInputVal(val);
@@ -234,6 +240,14 @@ function AnalysisContent() {
       {error && <p className="text-destructive text-sm">{error}</p>}
       {loading && <p className="text-muted-foreground">Running analysis...</p>}
 
+      {!symbol && !loading && !quote && (
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+          <Activity className="h-10 w-10 text-muted-foreground/40" />
+          <p className="text-muted-foreground font-medium">Search for any NSE/BSE stock</p>
+          <p className="text-sm text-muted-foreground/60">Enter a ticker (RELIANCE, TCS, INFY) or company name above</p>
+        </div>
+      )}
+
       {quote && technicals && !loading && (
         <>
           {/* Quote Strip */}
@@ -311,8 +325,8 @@ function AnalysisContent() {
                 <TechRow label="MACD Histogram" value={technicals.macdHistogram.toFixed(4)} signal={technicals.macdHistogram > 0 ? "bullish" : "bearish"} />
                 <TechRow label="Stochastic %K" value={technicals.stochastic.toFixed(2)} signal={stochSignal} />
                 <TechRow label="Stochastic %D" value={technicals.stochasticSignal.toFixed(2)} />
-                <TechRow label="SMA 50" value={formatCurrency(technicals.sma50)} signal={quote.price > technicals.sma50 ? "bullish" : "bearish"} />
-                <TechRow label="SMA 200" value={formatCurrency(technicals.sma200)} signal={quote.price > technicals.sma200 ? "bullish" : "bearish"} />
+                <TechRow label="50 DMA" value={formatCurrency(technicals.sma50)} signal={quote.price > technicals.sma50 ? "bullish" : "bearish"} />
+                <TechRow label="200 DMA" value={formatCurrency(technicals.sma200)} signal={quote.price > technicals.sma200 ? "bullish" : "bearish"} />
                 <TechRow label="Trend" value={technicals.trend} signal={trendSignal} />
                 <TechRow label="Support" value={formatCurrency(technicals.support)} />
                 <TechRow label="Resistance" value={formatCurrency(technicals.resistance)} />

@@ -3,267 +3,135 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePortfolio } from "@/contexts/portfolio-context";
 import { formatCurrency, formatPercent, formatCurrencyCompact } from "@/lib/utils";
-import type { Holding, HoldingWithMarket, Watchlist } from "@/types";
+import type { Holding } from "@/types";
 import type { DecisionData } from "@/app/api/ai/decision/route";
 import {
-  TrendingUp, TrendingDown, Activity, Star, Plus, Trash2,
-  RefreshCw, Shield, Zap, AlertTriangle, ArrowRight,
+  TrendingUp, TrendingDown, RefreshCw, AlertTriangle,
+  Star, Plus, Trash2, Brain, ArrowRight, ShieldAlert,
+  Zap, Eye, ChevronRight,
 } from "lucide-react";
-import { StockChartModal } from "@/components/charts/stock-chart-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
-} from "recharts";
+import type { Watchlist } from "@/types";
 
-const DECISION_ACTION_STYLES: Record<string, string> = {
-  BUY:                 "text-green-400 bg-green-400/10 border-green-400/30",
-  ACCUMULATE:          "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
-  HOLD:                "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
-  REDUCE:              "text-orange-400 bg-orange-400/10 border-orange-400/30",
-  BOOK_PARTIAL_PROFIT: "text-orange-400 bg-orange-400/10 border-orange-400/30",
-  SELL:                "text-red-400 bg-red-400/10 border-red-400/30",
-  WAIT:                "text-blue-400 bg-blue-400/10 border-blue-400/30",
-  WATCH:               "text-blue-400 bg-blue-400/10 border-blue-400/30",
+const ACTION_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  SELL:                { bg: "bg-red-500/10 border-red-500/30",    text: "text-red-400",    label: "SELL" },
+  REDUCE_POSITION:     { bg: "bg-orange-500/10 border-orange-500/30", text: "text-orange-400", label: "REDUCE" },
+  BOOK_PARTIAL_PROFITS:{ bg: "bg-amber-500/10 border-amber-500/30",text: "text-amber-400",  label: "BOOK PROFITS" },
+  BUY:                 { bg: "bg-green-500/10 border-green-500/30", text: "text-green-400",  label: "BUY" },
+  ACCUMULATE:          { bg: "bg-emerald-500/10 border-emerald-500/30", text: "text-emerald-400", label: "ACCUMULATE" },
+  HOLD:                { bg: "bg-blue-500/10 border-blue-500/30",   text: "text-blue-400",   label: "HOLD" },
+  WAIT_AND_WATCH:      { bg: "bg-sky-500/10 border-sky-500/30",     text: "text-sky-400",    label: "WATCH" },
 };
 
-const SECTOR_COLORS = [
-  "#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#64748b",
-];
-
-function ScoreGauge({ score, label, color }: { score: number; label: string; color: string }) {
-  const stroke = score >= 70 ? "#22c55e" : score >= 40 ? "#eab308" : "#ef4444";
-  const textColor = score >= 70 ? "text-green-400" : score >= 40 ? "text-yellow-400" : "text-red-400";
-  return (
-    <div className="flex items-center gap-3">
-      <div className="relative h-14 w-14">
-        <svg className="h-14 w-14 -rotate-90" viewBox="0 0 56 56">
-          <circle cx="28" cy="28" r="24" fill="none" stroke="hsl(var(--border))" strokeWidth="5" />
-          <circle
-            cx="28" cy="28" r="24" fill="none"
-            stroke={stroke}
-            strokeWidth="5"
-            strokeDasharray={`${(score / 100) * 150.8} 150.8`}
-            strokeLinecap="round"
-          />
-        </svg>
-        <span className={`absolute inset-0 flex items-center justify-center text-xs font-bold ${textColor}`}>
-          {score}
-        </span>
-      </div>
-      <div>
-        <p className={`font-semibold text-sm ${textColor}`}>{color}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </div>
-    </div>
-  );
-}
-
-function computeScores(holdings: HoldingWithMarket[]): { health: number; risk: number } {
-  if (holdings.length === 0) return { health: 0, risk: 50 };
-
-  // Health
-  let health = 50;
-  const winners = holdings.filter((h) => h.gainLoss > 0).length;
-  health += (winners / holdings.length) * 20;
-  const avgGL = holdings.reduce((s, h) => s + h.gainLossPercent, 0) / holdings.length;
-  health += Math.min(Math.max(avgGL, -20), 20);
-  const sectors = new Set(holdings.map((h) => h.sector ?? "Other")).size;
-  health += Math.min(sectors * 2, 10);
-
-  // Risk (lower = safer)
-  let risk = 50;
-  const concentration = holdings.length > 0
-    ? (holdings[0]?.currentValue ?? 0) / Math.max(holdings.reduce((s, h) => s + h.currentValue, 0), 1) * 100
-    : 0;
-  risk += concentration > 50 ? 20 : concentration > 30 ? 10 : 0;
-  risk -= sectors > 5 ? 10 : 0;
-  risk += avgGL < -10 ? 10 : 0;
-
-  return {
-    health: Math.min(Math.max(Math.round(health), 0), 100),
-    risk: Math.min(Math.max(Math.round(risk), 0), 100),
-  };
-}
+const SENTIMENT_STYLES = {
+  BULLISH: { color: "text-green-400",  bg: "bg-green-500/10 border-green-500/30",  dot: "bg-green-400"  },
+  NEUTRAL: { color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/30",dot: "bg-yellow-400" },
+  BEARISH: { color: "text-red-400",    bg: "bg-red-500/10 border-red-500/30",       dot: "bg-red-400"    },
+};
 
 export default function DashboardPage() {
-  const { activePortfolioId, activePortfolio } = usePortfolio();
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [quotes, setQuotes] = useState<Record<string, { price: number; change: number; changePercent: number }>>({});
+  const { activePortfolioId, activePortfolioLabel } = usePortfolio();
+  const [holdings, setHoldings]     = useState<Holding[]>([]);
+  const [quotes, setQuotes]         = useState<Record<string, { price: number; change: number; changePercent: number }>>({});
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [watchQuotes, setWatchQuotes] = useState<Record<string, { price: number; changePercent: number }>>({});
-  const [loading, setLoading] = useState(true);
+  const [decision, setDecision]     = useState<DecisionData | null>(null);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [decisionData, setDecisionData] = useState<DecisionData | null>(null);
+  const [aiError, setAiError]       = useState<string | null>(null);
   const [watchInput, setWatchInput] = useState("");
   const [activeListId, setActiveListId] = useState<string>("");
   const [addingWatch, setAddingWatch] = useState(false);
-  const [chartSymbol, setChartSymbol] = useState<{ symbol: string; exchange?: string; name?: string } | null>(null);
-  const [drillDownSymbol, setDrillDownSymbol] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
-    const holdingsUrl = activePortfolioId
-      ? `/api/holdings?portfolioId=${activePortfolioId}`
-      : "/api/holdings";
-    const decUrl = activePortfolioId
-      ? `/api/ai/decision?portfolioId=${activePortfolioId}&quick=1`
-      : `/api/ai/decision?quick=1`;
+    const holdUrl = activePortfolioId ? `/api/holdings?portfolioId=${activePortfolioId}` : "/api/holdings";
+    const decUrl  = activePortfolioId ? `/api/ai/decision?portfolioId=${activePortfolioId}&quick=1` : "/api/ai/decision?quick=1";
     const [hRes, wRes, decRes] = await Promise.all([
-      fetch(holdingsUrl),
-      fetch("/api/watchlist"),
-      fetch(decUrl),
+      fetch(holdUrl), fetch("/api/watchlist"), fetch(decUrl),
     ]);
     const [hData, wData] = await Promise.all([hRes.json(), wRes.json()]);
     setHoldings(hData);
     setWatchlists(wData);
     if (!activeListId && wData.length > 0) setActiveListId(wData[0].id);
     if (decRes.ok) {
-      const decData = await decRes.json();
-      if (!decData.error) setDecisionData(decData);
+      const d = await decRes.json();
+      if (!d.error) { setDecision(d); setAiError(d.aiError ?? null); }
     }
     setLoading(false);
   }, [activePortfolioId, activeListId]);
 
   const fetchQuotesFor = useCallback(async (
     items: { symbol: string; exchange?: string }[],
-    setter: (q: Record<string, { price: number; change: number; changePercent: number }>) => void
+    setter: (q: Record<string, { price: number; change: number; changePercent: number }>) => void,
   ) => {
-    const results = await Promise.allSettled(
-      items.map((h) =>
-        fetch(`/api/market/${h.symbol}?exchange=${h.exchange ?? "NSE"}`).then((r) => r.json())
-      )
+    const res = await Promise.allSettled(
+      items.map(h => fetch(`/api/market/${h.symbol}?exchange=${h.exchange ?? "NSE"}`).then(r => r.json()))
     );
     const map: Record<string, { price: number; change: number; changePercent: number }> = {};
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled" && r.value?.price) {
-        map[items[i].symbol] = { price: r.value.price, change: r.value.change, changePercent: r.value.changePercent };
-      }
+    res.forEach((r, i) => {
+      if (r.status === "fulfilled" && r.value?.price) map[items[i].symbol] = { price: r.value.price, change: r.value.change, changePercent: r.value.changePercent };
     });
     setter(map);
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
-
+  useEffect(() => { if (holdings.length > 0) fetchQuotesFor(holdings, setQuotes); }, [holdings, fetchQuotesFor]);
   useEffect(() => {
-    if (holdings.length > 0)
-      fetchQuotesFor(holdings, setQuotes);
-  }, [holdings, fetchQuotesFor]);
-
-  useEffect(() => {
-    const activeList = watchlists.find((l) => l.id === activeListId);
-    if (activeList && activeList.items.length > 0)
-      fetchQuotesFor(activeList.items, setWatchQuotes as never);
+    const list = watchlists.find(l => l.id === activeListId);
+    if (list?.items.length) fetchQuotesFor(list.items, setWatchQuotes as never);
   }, [watchlists, activeListId, fetchQuotesFor]);
 
-  // Auto-refresh quotes every 10 min during market hours (9:15–15:30 IST, Mon–Fri)
+  // Auto-refresh during market hours
   useEffect(() => {
     if (holdings.length === 0) return;
-    const isMarketHours = () => {
+    const isOpen = () => {
       const now = new Date();
       if ([0, 6].includes(now.getDay())) return false;
-      const istMin = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
-      return istMin >= 555 && istMin <= 930; // 9:15–15:30
+      const m = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
+      return m >= 555 && m <= 930;
     };
-    const timer = setInterval(() => {
-      if (!isMarketHours()) return;
+    const t = setInterval(() => {
+      if (!isOpen()) return;
       fetchQuotesFor(holdings, setQuotes);
-      const activeList = watchlists.find(l => l.id === activeListId);
-      if (activeList?.items.length) fetchQuotesFor(activeList.items, setWatchQuotes as never);
-    }, 10 * 60 * 1000);
-    return () => clearInterval(timer);
+      const list = watchlists.find(l => l.id === activeListId);
+      if (list?.items.length) fetchQuotesFor(list.items, setWatchQuotes as never);
+    }, 10 * 60_000);
+    return () => clearInterval(t);
   }, [holdings, watchlists, activeListId, fetchQuotesFor]);
-
-  // Morning Brief notification — fires once per day between 9:00–10:30 AM IST
-  useEffect(() => {
-    if (!decisionData || typeof window === "undefined") return;
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
-    const today = new Date().toISOString().slice(0, 10);
-    if (localStorage.getItem("raios_morning_brief_date") === today) return;
-    const istMin = (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() + 330) % 1440;
-    if (istMin < 540 || istMin > 630) return; // 9:00–10:30 AM IST
-    const urgent = decisionData.todayDecisions.filter(d => d.urgency === "URGENT" || d.urgency === "HIGH");
-    if (urgent.length > 0) {
-      new Notification("RAIOS Morning Brief", {
-        body: `${urgent.length} action${urgent.length > 1 ? "s" : ""} needed: ${urgent.slice(0, 3).map(u => `${u.action.replace(/_/g, " ")} ${u.symbol}`).join(", ")}`,
-        tag: "raios-morning-brief",
-        icon: "/globe.svg",
-      });
-    } else {
-      new Notification("RAIOS Morning Brief", {
-        body: `All ${decisionData.todayDecisions.length} positions are HOLD or WAIT — no urgent actions today.`,
-        tag: "raios-morning-brief",
-        icon: "/globe.svg",
-      });
-    }
-    localStorage.setItem("raios_morning_brief_date", today);
-  }, [decisionData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    const activeList = watchlists.find((l) => l.id === activeListId);
-    const decUrl = activePortfolioId
-      ? `/api/ai/decision?portfolioId=${activePortfolioId}&quick=1`
-      : `/api/ai/decision?quick=1`;
+    const list = watchlists.find(l => l.id === activeListId);
+    const decUrl = activePortfolioId ? `/api/ai/decision?portfolioId=${activePortfolioId}&force=1` : "/api/ai/decision?force=1";
     await Promise.all([
       holdings.length > 0 ? fetchQuotesFor(holdings, setQuotes) : Promise.resolve(),
-      activeList?.items.length ? fetchQuotesFor(activeList.items, setWatchQuotes as never) : Promise.resolve(),
-      fetch(decUrl).then(r => r.ok ? r.json() : null).then(d => { if (d && !d.error) setDecisionData(d); }),
+      list?.items.length ? fetchQuotesFor(list.items, setWatchQuotes as never) : Promise.resolve(),
+      fetch(decUrl).then(r => r.ok ? r.json() : null).then(d => { if (d && !d.error) { setDecision(d); setAiError(d.aiError ?? null); } }),
     ]);
     setRefreshing(false);
   };
 
-  const enriched: HoldingWithMarket[] = holdings.map((h) => {
+  // Portfolio metrics
+  const enriched = holdings.map(h => {
     const q = quotes[h.symbol];
-    const currentPrice = q?.price ?? h.avgCost;
-    const currentValue = currentPrice * h.shares;
-    const totalCost = h.avgCost * h.shares;
-    const gainLoss = currentValue - totalCost;
-    const gainLossPercent = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
-    const dayChange = (q?.change ?? 0) * h.shares;
-    const dayChangePercent = q?.changePercent ?? 0;
-    return { ...h, currentPrice, currentValue, totalCost, gainLoss, gainLossPercent, dayChange, dayChangePercent };
+    const price       = q?.price ?? h.avgCost;
+    const currentVal  = price * h.shares;
+    const cost        = h.avgCost * h.shares;
+    const gl          = currentVal - cost;
+    const glPct       = cost > 0 ? (gl / cost) * 100 : 0;
+    const dayChange   = (q?.change ?? 0) * h.shares;
+    return { ...h, price, currentVal, cost, gl, glPct, dayChange };
   });
 
-  const totalValue = enriched.reduce((s, h) => s + h.currentValue, 0);
-  const totalCost = enriched.reduce((s, h) => s + h.totalCost, 0);
-  const totalGL = totalValue - totalCost;
-  const totalGLPct = totalCost > 0 ? (totalGL / totalCost) * 100 : 0;
-  const dayGL = enriched.reduce((s, h) => s + h.dayChange, 0);
-  const dayGLPct = totalValue > 0 ? (dayGL / (totalValue - dayGL)) * 100 : 0;
-  const { health: healthScore, risk: riskScore } = computeScores(enriched);
-
-  // Sector allocation
-  const sectorMap: Record<string, number> = {};
-  enriched.forEach((h) => {
-    const s = h.sector ?? "Other";
-    sectorMap[s] = (sectorMap[s] ?? 0) + h.currentValue;
-  });
-  const sectorData = Object.entries(sectorMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, value], i) => ({
-      name,
-      value,
-      pct: totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : "0",
-      color: SECTOR_COLORS[i % SECTOR_COLORS.length],
-    }));
-
-  // Top 5 by value for allocation pie
-  const topAlloc = [...enriched]
-    .sort((a, b) => b.currentValue - a.currentValue)
-    .slice(0, 6)
-    .map((h, i) => ({
-      name: h.symbol,
-      value: h.currentValue,
-      color: SECTOR_COLORS[i % SECTOR_COLORS.length],
-    }));
-
-  const topGainers = [...enriched].sort((a, b) => b.gainLossPercent - a.gainLossPercent).slice(0, 3);
-  const topLosers = [...enriched].sort((a, b) => a.gainLossPercent - b.gainLossPercent).slice(0, 3);
-  const topHoldings = [...enriched].sort((a, b) => b.currentValue - a.currentValue).slice(0, 5);
+  const totalValue   = enriched.reduce((s, h) => s + h.currentVal, 0);
+  const totalCost    = enriched.reduce((s, h) => s + h.cost, 0);
+  const totalGL      = totalValue - totalCost;
+  const totalGLPct   = totalCost > 0 ? (totalGL / totalCost) * 100 : 0;
+  const dayGL        = enriched.reduce((s, h) => s + h.dayChange, 0);
+  const dayGLPct     = totalValue > 0 ? (dayGL / (totalValue - dayGL || 1)) * 100 : 0;
+  const healthScore  = decision?.portfolioHealthScore ?? 0;
 
   const handleAddWatch = async () => {
     const sym = watchInput.trim().toUpperCase();
@@ -271,7 +139,7 @@ export default function DashboardPage() {
     setAddingWatch(true);
     try {
       const qRes = await fetch(`/api/market/${sym}?exchange=NSE`);
-      if (!qRes.ok) throw new Error("Symbol not found");
+      if (!qRes.ok) throw new Error();
       const q = await qRes.json();
       await fetch("/api/watchlist", {
         method: "POST",
@@ -280,11 +148,8 @@ export default function DashboardPage() {
       });
       setWatchInput("");
       await fetchAll();
-    } catch {
-      alert("Could not find symbol. Check the ticker and try again.");
-    } finally {
-      setAddingWatch(false);
-    }
+    } catch { alert("Could not find symbol."); }
+    finally { setAddingWatch(false); }
   };
 
   const handleRemoveWatch = async (id: string) => {
@@ -292,447 +157,310 @@ export default function DashboardPage() {
     fetchAll();
   };
 
-  const activeList = watchlists.find((l) => l.id === activeListId);
+  const activeList = watchlists.find(l => l.id === activeListId);
+  const sentiment = decision?.marketSentiment ?? "NEUTRAL";
+  const sentStyle = SENTIMENT_STYLES[sentiment];
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full gap-3">
+      <Brain className="h-6 w-6 text-primary animate-pulse" />
+      <span className="text-sm text-muted-foreground">Loading your portfolio…</span>
+    </div>
+  );
+
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            {activePortfolio?.name ?? "Portfolio"} · {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-          </p>
+          <h1 className="text-xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">{activePortfolioLabel} · {today}</p>
         </div>
         <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
 
-      {/* KPI Cards */}
+      {aiError && (
+        <div className="flex items-center gap-2 text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-4 py-2.5">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>{aiError}</span>
+        </div>
+      )}
+
+      {/* ── 4 Key Metrics ───────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="metric-label">Portfolio Value</p>
-          <p className="metric-value">{formatCurrencyCompact(totalValue)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{holdings.length} positions</p>
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Portfolio Value</p>
+          <p className="text-2xl font-bold tabular-nums">{formatCurrencyCompact(totalValue)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{holdings.length} position{holdings.length !== 1 ? "s" : ""}</p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="metric-label">Today&apos;s Gain/Loss</p>
-          <p className={`metric-value ${dayGL >= 0 ? "gain" : "loss"}`}>{formatCurrencyCompact(dayGL)}</p>
-          <p className={`text-sm ${dayGL >= 0 ? "gain" : "loss"}`}>{formatPercent(dayGLPct)}</p>
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Total P&amp;L</p>
+          <p className={`text-2xl font-bold tabular-nums ${totalGL >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {totalGL >= 0 ? "+" : ""}{formatCurrencyCompact(totalGL)}
+          </p>
+          <p className={`text-xs mt-1 ${totalGL >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {totalGL >= 0 ? "+" : ""}{totalGLPct.toFixed(2)}% overall
+          </p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="metric-label">Total Gain/Loss</p>
-          <p className={`metric-value ${totalGL >= 0 ? "gain" : "loss"}`}>{formatCurrencyCompact(totalGL)}</p>
-          <p className={`text-sm ${totalGL >= 0 ? "gain" : "loss"}`}>{formatPercent(totalGLPct)}</p>
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Health Score</p>
+          <p className={`text-2xl font-bold tabular-nums ${healthScore >= 70 ? "text-green-400" : healthScore >= 45 ? "text-yellow-400" : "text-red-400"}`}>
+            {healthScore}<span className="text-base font-normal text-muted-foreground">/100</span>
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {healthScore >= 70 ? "Technically Strong" : healthScore >= 45 ? "Mixed Signals" : "Needs Attention"}
+          </p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4 flex items-center gap-4">
-          <ScoreGauge score={healthScore} label="Health" color={healthScore >= 70 ? "Healthy" : healthScore >= 40 ? "Moderate" : "At Risk"} />
-          <div className="w-px h-10 bg-border" />
-          <ScoreGauge score={riskScore} label="Risk" color={riskScore >= 70 ? "High Risk" : riskScore >= 40 ? "Medium" : "Low Risk"} />
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Today&apos;s Change</p>
+          <p className={`text-2xl font-bold tabular-nums ${dayGL >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {dayGL >= 0 ? "+" : ""}{formatCurrencyCompact(dayGL)}
+          </p>
+          <p className={`text-xs mt-1 ${dayGL >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {dayGL >= 0 ? "+" : ""}{dayGLPct.toFixed(2)}% today
+          </p>
         </div>
       </div>
 
-      {/* TODAY'S COMMAND CENTRE — Decision Engine (quick mode) */}
-      {decisionData && enriched.length > 0 && (() => {
-        const urgentActions = decisionData.todayDecisions.filter(
-          d => d.urgency === "URGENT" || d.urgency === "HIGH"
-        );
-        return (
-          <div className="space-y-3">
-            {/* Urgent/High priority alert banner */}
-            {urgentActions.length > 0 && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-                <p className="text-xs font-bold text-red-400 mb-2.5 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> REQUIRES ATTENTION TODAY
-                </p>
-                <div className="flex flex-col gap-1.5">
-                  {urgentActions.map(a => (
-                    <div key={a.symbol} className="flex items-start gap-2 text-xs">
-                      <span className={`shrink-0 font-bold px-2 py-0.5 rounded border font-mono text-[10px] ${DECISION_ACTION_STYLES[a.action] ?? "text-muted-foreground border-border"}`}>
-                        {a.action.replace(/_/g, " ")}
-                      </span>
-                      <span className="font-mono font-semibold text-foreground">{a.symbol}</span>
-                      <span className="text-muted-foreground leading-relaxed">{a.reason}</span>
-                    </div>
+      {/* ── Main Content: Left (Alerts) + Right (Opportunity / Risk / Outlook) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* LEFT — Attention + Watchlist */}
+        <div className="lg:col-span-2 space-y-5">
+
+          {/* Attention Required */}
+          {decision && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-red-400" />
+                  <h2 className="text-sm font-bold">Requires Attention Today</h2>
+                </div>
+                <Link href="/portfolio-manager" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  Full Analysis <ChevronRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              {decision.attentionRequired.length === 0 ? (
+                <div className="rounded-xl border border-border bg-card px-5 py-8 text-center">
+                  <div className="text-green-400 text-2xl mb-2">✓</div>
+                  <p className="text-sm font-medium text-foreground">No urgent actions today</p>
+                  <p className="text-xs text-muted-foreground mt-1">All holdings look technically stable</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {decision.attentionRequired.map(item => {
+                    const style = ACTION_STYLES[item.action] ?? ACTION_STYLES["SELL"];
+                    return (
+                      <div key={item.symbol} className={`rounded-xl border ${style.bg} p-4`}>
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-md border ${style.bg} ${style.text}`}>
+                              {item.urgency === "URGENT" ? "🔴 URGENT" : "🟠 HIGH"} · {style.label}
+                            </span>
+                            <span className="font-bold text-sm">{item.symbol}</span>
+                          </div>
+                          <span className={`text-xs font-semibold ${style.text}`}>{item.confidence}% confidence</span>
+                        </div>
+                        <ul className="space-y-1">
+                          {item.reasons.map((r, i) => (
+                            <li key={i} className="text-xs text-muted-foreground flex items-start gap-2">
+                              <span className="mt-0.5 shrink-0">·</span>{r}
+                            </li>
+                          ))}
+                        </ul>
+                        <Link href="/portfolio-manager" className={`mt-3 text-xs font-medium ${style.text} hover:underline flex items-center gap-1`}>
+                          View full analysis <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Watchlist */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Star className="h-4 w-4 text-amber-400" />
+              <h2 className="text-sm font-bold">Watchlist</h2>
+              {watchlists.length > 1 && (
+                <div className="flex gap-1 ml-2">
+                  {watchlists.map(l => (
+                    <button key={l.id} onClick={() => setActiveListId(l.id)}
+                      className={`text-xs px-2 py-0.5 rounded-md border transition-colors ${activeListId === l.id ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground border-border hover:text-foreground"}`}>
+                      {l.name}
+                    </button>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* 3-card portfolio intelligence strip — click any card for full AI breakdown */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <button
-                onClick={() => setDrillDownSymbol(decisionData.topOpportunity.symbol)}
-                className="bg-card border border-green-400/20 rounded-lg p-3 text-left hover:border-green-400/50 hover:bg-green-400/5 transition-colors group"
-              >
-                <p className="text-[10px] font-bold text-green-400 mb-1 flex items-center gap-1">
-                  <Star className="h-3 w-3" /> TOP OPPORTUNITY
-                  <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                </p>
-                <p className="font-mono font-bold">{decisionData.topOpportunity.symbol}</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
-                  {decisionData.topOpportunity.why}
-                </p>
-                <p className="text-xs text-green-400 font-mono mt-1">{decisionData.topOpportunity.confidence}% confidence</p>
-              </button>
-              <button
-                onClick={() => setDrillDownSymbol(decisionData.highestRisk.symbol)}
-                className="bg-card border border-red-400/20 rounded-lg p-3 text-left hover:border-red-400/50 hover:bg-red-400/5 transition-colors group"
-              >
-                <p className="text-[10px] font-bold text-red-400 mb-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" /> HIGHEST RISK
-                  <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                </p>
-                <p className="font-mono font-bold">{decisionData.highestRisk.symbol}</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
-                  {decisionData.highestRisk.why}
-                </p>
-                <p className="text-xs text-red-400/70 font-mono mt-1 text-[10px]">Tap for full breakdown</p>
-              </button>
-              <button
-                onClick={() => setDrillDownSymbol(decisionData.highestConviction.symbol)}
-                className="bg-card border border-yellow-400/20 rounded-lg p-3 text-left hover:border-yellow-400/50 hover:bg-yellow-400/5 transition-colors group"
-              >
-                <p className="text-[10px] font-bold text-yellow-400 mb-1 flex items-center gap-1">
-                  <Zap className="h-3 w-3" /> HIGHEST CONVICTION
-                  <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                </p>
-                <div className="flex items-center gap-2">
-                  <p className="font-mono font-bold">{decisionData.highestConviction.symbol}</p>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${DECISION_ACTION_STYLES[decisionData.highestConviction.action] ?? "text-muted-foreground border-border"}`}>
-                    {decisionData.highestConviction.action.replace(/_/g, " ")}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
-                  {decisionData.highestConviction.why}
-                </p>
-                <p className="text-xs text-yellow-400 font-mono mt-1">{decisionData.highestConviction.confidence}% confidence</p>
-              </button>
+              )}
             </div>
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex gap-2 p-3 border-b border-border">
+                <Input
+                  value={watchInput}
+                  onChange={e => setWatchInput(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === "Enter" && handleAddWatch()}
+                  placeholder="Add symbol (e.g. INFY)"
+                  className="h-8 text-xs font-mono"
+                />
+                <Button size="sm" onClick={handleAddWatch} disabled={addingWatch} className="h-8 px-3">
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              {!activeList?.items.length ? (
+                <p className="text-xs text-muted-foreground text-center py-8">Add stocks to your watchlist</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {activeList.items.map(item => {
+                    const q = watchQuotes[item.symbol];
+                    const chg = q?.changePercent ?? 0;
+                    return (
+                      <div key={item.symbol} className="flex items-center justify-between px-4 py-2.5 hover:bg-accent/30 transition-colors">
+                        <div>
+                          <p className="text-sm font-semibold font-mono">{item.symbol}</p>
+                          <p className="text-xs text-muted-foreground">{item.name}</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-sm font-mono">{q ? formatCurrency(q.price) : "—"}</p>
+                            <p className={`text-xs font-mono ${chg >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {chg >= 0 ? "+" : ""}{chg.toFixed(2)}%
+                            </p>
+                          </div>
+                          <button onClick={() => handleRemoveWatch(item.id)} className="text-muted-foreground hover:text-red-400 transition-colors">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
-            <div className="flex justify-end">
-              <Link href="/portfolio-manager">
-                <button className="text-xs text-primary hover:underline flex items-center gap-1">
-                  Full Action Plan → AI Portfolio Manager <ArrowRight className="h-3 w-3" />
-                </button>
+        {/* RIGHT — Opportunity / Risk / Market Outlook */}
+        <div className="space-y-4">
+
+          {/* Top Opportunity */}
+          {decision?.topOpportunity && (
+            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="h-4 w-4 text-emerald-400" />
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Top Opportunity</span>
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-bold text-base">{decision.topOpportunity.symbol}</span>
+                <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  {decision.topOpportunity.action}
+                </span>
+                <span className="text-xs text-emerald-400 ml-auto">{decision.topOpportunity.confidence}%</span>
+              </div>
+              <ul className="space-y-1 mb-3">
+                {decision.topOpportunity.reasons.slice(0, 3).map((r, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="shrink-0 mt-0.5">·</span>{r}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/portfolio-manager" className="text-xs text-emerald-400 hover:underline flex items-center gap-1">
+                View details <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
-          </div>
-        );
-      })()}
+          )}
 
-      {/* Charts Row */}
-      {enriched.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Sector Allocation */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h2 className="font-semibold mb-3 flex items-center gap-2">
-              <Activity className="h-4 w-4" /> Sector Allocation
-            </h2>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={sectorData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={2} dataKey="value">
-                  {sectorData.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v: unknown) => formatCurrencyCompact(v as number)} />
-                <Legend
-                  formatter={(v) => {
-                    const s = sectorData.find((d) => d.name === v);
-                    return `${v} (${s?.pct}%)`;
-                  }}
-                  iconSize={10}
-                  wrapperStyle={{ fontSize: "11px" }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          {/* Biggest Risk */}
+          {decision?.biggestRisk && (
+            <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="h-4 w-4 text-red-400" />
+                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Biggest Risk</span>
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-bold text-base">{decision.biggestRisk.symbol}</span>
+                <span className="text-xs text-red-400 ml-auto">{decision.biggestRisk.confidence}% concern</span>
+              </div>
+              <ul className="space-y-1 mb-3">
+                {decision.biggestRisk.reasons.slice(0, 3).map((r, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="shrink-0 mt-0.5">·</span>{r}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/portfolio-manager" className="text-xs text-red-400 hover:underline flex items-center gap-1">
+                View details <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          )}
 
-          {/* Portfolio Allocation */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h2 className="font-semibold mb-3 flex items-center gap-2">
-              <Zap className="h-4 w-4" /> Stock Allocation
-            </h2>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={topAlloc} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={2} dataKey="value">
-                  {topAlloc.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v: unknown) => formatCurrencyCompact(v as number)} />
-                <Legend iconSize={10} wrapperStyle={{ fontSize: "11px" }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
+          {/* Market Outlook */}
+          {decision && (
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Eye className="h-4 w-4 text-primary" />
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Market Outlook</span>
+              </div>
+              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold mb-3 ${sentStyle.bg} ${sentStyle.color}`}>
+                <span className={`w-2 h-2 rounded-full ${sentStyle.dot}`} />
+                {sentiment}
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed mb-3">{decision.marketContext}</p>
+              <ul className="space-y-1">
+                {decision.marketReasons.map((r, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="shrink-0 mt-0.5 text-primary">›</span>{r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-      {/* Top Gainers/Losers Row */}
-      {enriched.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h2 className="font-semibold mb-3 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 gain" /> Top Gainers
-            </h2>
+          {/* Holdings summary */}
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Top Holdings</span>
+              <Link href="/portfolio" className="text-xs text-primary hover:underline">View all</Link>
+            </div>
             <div className="space-y-2">
-              {topGainers.map((h) => (
-                <div key={h.id} className="flex items-center justify-between">
+              {enriched.sort((a, b) => b.currentVal - a.currentVal).slice(0, 5).map(h => (
+                <div key={h.symbol} className="flex items-center justify-between">
                   <div>
-                    <button onClick={() => setChartSymbol({ symbol: h.symbol, exchange: h.exchange, name: h.name })} className="font-mono font-semibold text-primary hover:underline text-sm">
-                      {h.symbol}
-                    </button>
-                    <p className="text-xs text-muted-foreground">{h.name}</p>
+                    <p className="text-xs font-semibold font-mono">{h.symbol}</p>
+                    <p className="text-[10px] text-muted-foreground">{h.sector ?? "—"}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-mono">{formatCurrency(h.currentPrice)}</p>
-                    <p className="text-xs gain">{formatPercent(h.gainLossPercent)}</p>
+                    <p className="text-xs font-mono">{formatCurrency(h.price)}</p>
+                    <p className={`text-[10px] font-mono ${h.glPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {h.glPct >= 0 ? "+" : ""}{h.glPct.toFixed(1)}%
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h2 className="font-semibold mb-3 flex items-center gap-2">
-              <TrendingDown className="h-4 w-4 loss" /> Top Losers
-            </h2>
-            <div className="space-y-2">
-              {topLosers.map((h) => (
-                <div key={h.id} className="flex items-center justify-between">
-                  <div>
-                    <button onClick={() => setChartSymbol({ symbol: h.symbol, exchange: h.exchange, name: h.name })} className="font-mono font-semibold text-primary hover:underline text-sm">
-                      {h.symbol}
-                    </button>
-                    <p className="text-xs text-muted-foreground">{h.name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-mono">{formatCurrency(h.currentPrice)}</p>
-                    <p className="text-xs loss">{formatPercent(h.gainLossPercent)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Holdings Table */}
-        <div className="lg:col-span-2 rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h2 className="font-semibold">Top Holdings</h2>
-            <Link href="/portfolio">
-              <Button variant="ghost" size="sm">View All</Button>
+          {/* Quick links */}
+          <div className="grid grid-cols-2 gap-2">
+            <Link href="/portfolio-manager" className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-center hover:bg-primary/10 transition-colors">
+              <Brain className="h-4 w-4 text-primary mx-auto mb-1" />
+              <p className="text-xs font-semibold text-primary">AI Manager</p>
             </Link>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th className="text-right">Price</th>
-                  <th className="text-right">Day</th>
-                  <th className="text-right">Value</th>
-                  <th className="text-right">Total G/L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">Loading...</td></tr>
-                ) : topHoldings.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-8 text-muted-foreground">
-                      <p>No holdings yet.</p>
-                      <Link href="/portfolio">
-                        <Button variant="outline" size="sm" className="mt-2">
-                          <Plus className="h-3 w-3 mr-1" /> Add Holding
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                ) : (
-                  topHoldings.map((h) => (
-                    <tr key={h.id}>
-                      <td>
-                        <button onClick={() => setChartSymbol({ symbol: h.symbol, exchange: h.exchange, name: h.name })} className="font-mono font-semibold text-primary hover:underline">
-                          {h.symbol}
-                        </button>
-                        <p className="text-xs text-muted-foreground truncate max-w-[120px]">{h.name}</p>
-                      </td>
-                      <td className="text-right font-mono">{formatCurrency(h.currentPrice)}</td>
-                      <td className={`text-right ${h.dayChangePercent >= 0 ? "gain" : "loss"}`}>
-                        {h.dayChangePercent >= 0 ? <TrendingUp className="inline h-3 w-3 mr-0.5" /> : <TrendingDown className="inline h-3 w-3 mr-0.5" />}
-                        {formatPercent(h.dayChangePercent)}
-                      </td>
-                      <td className="text-right">{formatCurrencyCompact(h.currentValue)}</td>
-                      <td className={`text-right ${h.gainLoss >= 0 ? "gain" : "loss"}`}>
-                        {formatPercent(h.gainLossPercent)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Named Watchlist */}
-        <div className="rounded-lg border border-border bg-card flex flex-col">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-            <Star className="h-4 w-4 text-yellow-400 shrink-0" />
-            <div className="flex gap-1 overflow-x-auto flex-1 min-w-0">
-              {watchlists.map((l) => (
-                <button
-                  key={l.id}
-                  onClick={() => setActiveListId(l.id)}
-                  className={`text-xs px-2 py-1 rounded whitespace-nowrap transition-colors ${activeListId === l.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-                >
-                  {l.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="p-3 flex-1 space-y-1">
-            <div className="flex gap-2 mb-3">
-              <Input
-                placeholder="NSE symbol..."
-                value={watchInput}
-                onChange={(e) => setWatchInput(e.target.value.toUpperCase())}
-                onKeyDown={(e) => e.key === "Enter" && handleAddWatch()}
-                className="h-8 text-sm"
-              />
-              <Button size="sm" className="h-8" onClick={handleAddWatch} disabled={addingWatch || !activeListId}>
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
-            {!activeList || activeList.items.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No symbols in this list.</p>
-            ) : (
-              activeList.items.map((w) => {
-                const q = watchQuotes[w.symbol];
-                return (
-                  <div key={w.id} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-accent/50">
-                    <div>
-                      <button onClick={() => setChartSymbol({ symbol: w.symbol, name: w.name })} className="text-sm font-mono font-semibold text-primary hover:underline">
-                        {w.symbol}
-                      </button>
-                      <p className="text-xs text-muted-foreground truncate max-w-[90px]">{w.name}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {q ? (
-                        <div className="text-right">
-                          <p className="text-sm font-mono">{formatCurrency(q.price)}</p>
-                          <p className={`text-xs ${q.changePercent >= 0 ? "gain" : "loss"}`}>
-                            {formatPercent(q.changePercent)}
-                          </p>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleRemoveWatch(w.id)}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            <Link href="/market" className="rounded-lg border border-border bg-card p-3 text-center hover:bg-accent transition-colors">
+              <TrendingUp className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
+              <p className="text-xs font-semibold text-muted-foreground">Market</p>
+            </Link>
           </div>
         </div>
       </div>
-
-      {/* Explainable AI Drill-Down Modal */}
-      {drillDownSymbol && decisionData && (() => {
-        const d = decisionData.todayDecisions.find(x => x.symbol === drillDownSymbol);
-        if (!d) return null;
-        return (
-          <div
-            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={() => setDrillDownSymbol(null)}
-          >
-            <div
-              className="bg-card border border-border rounded-xl max-w-lg w-full p-5 space-y-4 max-h-[85vh] overflow-y-auto"
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-mono font-bold text-lg">{d.symbol}</span>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded border ${DECISION_ACTION_STYLES[d.action] ?? "text-muted-foreground border-border"}`}>
-                      {d.action.replace(/_/g, " ")}
-                    </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-muted-foreground">
-                      {d.analysisTimeframe}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{d.priceLevel} · {d.confidence}% confidence · Risk: <span className={d.riskLevel === "HIGH" ? "text-red-400" : d.riskLevel === "MEDIUM" ? "text-yellow-400" : "text-green-400"}>{d.riskLevel}</span></p>
-                </div>
-                <button
-                  onClick={() => setDrillDownSymbol(null)}
-                  className="text-muted-foreground hover:text-foreground text-2xl leading-none ml-4"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Reason */}
-              <p className="text-sm leading-relaxed border-b border-border pb-4">{d.reason}</p>
-
-              {/* 2-col grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-muted/30 rounded-lg p-3">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1.5">Your Position</p>
-                  <p className="text-xs leading-relaxed">{d.portfolioContext}</p>
-                  <p className="text-xs text-green-400 mt-1.5">{d.expectedReward}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Hold: {d.holdingPeriod}</p>
-                </div>
-                <div className="bg-muted/30 rounded-lg p-3">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1.5">Why Now?</p>
-                  <p className="text-xs leading-relaxed">{d.whyNow}</p>
-                </div>
-              </div>
-
-              {/* Technical */}
-              <div className="bg-muted/30 rounded-lg p-3">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1.5">Technical Signals</p>
-                <p className="text-xs font-mono leading-relaxed text-foreground/80">{d.technicalSignal}</p>
-              </div>
-
-              {/* Invalidation */}
-              <div className="bg-yellow-900/10 border border-yellow-900/30 rounded-lg p-3">
-                <p className="text-[10px] font-bold text-yellow-400 mb-1">What would change this?</p>
-                <p className="text-xs leading-relaxed">{d.whatCouldInvalidate}</p>
-              </div>
-
-              {/* Verdict */}
-              <div className="bg-primary/5 border border-primary/30 rounded-lg p-3">
-                <p className="text-[10px] font-bold text-primary mb-1">AI VERDICT</p>
-                <p className="text-sm font-medium leading-relaxed">{d.finalVerdict}</p>
-              </div>
-
-              <button
-                onClick={() => setDrillDownSymbol(null)}
-                className="w-full text-center text-xs text-muted-foreground hover:text-foreground py-1"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {chartSymbol && (
-        <StockChartModal
-          symbol={chartSymbol.symbol}
-          exchange={chartSymbol.exchange}
-          name={chartSymbol.name}
-          onClose={() => setChartSymbol(null)}
-        />
-      )}
     </div>
   );
 }

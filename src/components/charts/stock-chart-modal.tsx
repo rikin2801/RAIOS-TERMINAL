@@ -9,6 +9,7 @@ import {
   HistogramSeries,
   ColorType,
   CrosshairMode,
+  LineStyle,
   type IChartApi,
 } from "lightweight-charts";
 import {
@@ -249,6 +250,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
   const [showRSI, setShowRSI] = useState(true);
   const [showMACD, setShowMACD] = useState(true);
   const [showStoch, setShowStoch] = useState(true);
+  const [dailyCandles, setDailyCandles] = useState<Candle[]>([]);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -263,9 +265,10 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/market/${symbol}?include=chart&period=${period}&interval=${interval}&exchange=${exchange}`
-      );
+      const [res, dailyRes] = await Promise.all([
+        fetch(`/api/market/${symbol}?include=chart&period=${period}&interval=${interval}&exchange=${exchange}`),
+        fetch(`/api/market/${symbol}?include=chart&period=1Y&interval=1d&exchange=${exchange}`),
+      ]);
       if (!res.ok) throw new Error("Failed to load chart data");
       const data = await res.json();
       setCandles(data.candles ?? []);
@@ -279,6 +282,10 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
           fiftyTwoWeekLow: data.quote.fiftyTwoWeekLow,
           pe: data.quote.pe,
         });
+      }
+      if (dailyRes.ok) {
+        const dailyData = await dailyRes.json();
+        setDailyCandles(dailyData.candles ?? []);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load chart");
@@ -333,22 +340,45 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
       color: c.close >= c.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
     })));
 
-    const closes = candles.map((c) => c.close);
+    // DMA: use 1Y daily closes when available so the calculation is always
+    // based on real daily closing prices, regardless of the current interval.
+    // For daily-interval charts with enough candles we use those directly.
+    const dmaSource =
+      interval === "1d" && candles.length >= 200
+        ? candles
+        : dailyCandles.length >= 50
+        ? dailyCandles
+        : candles;
+    const dmaCloses = dmaSource.map((c) => c.close);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const times = candles.map((c) => c.time as any);
-    const makeSMA = (p: number) =>
-      Array.from({ length: closes.length - p + 1 }, (_, i) => ({
-        time: times[i + p - 1],
-        value: closes.slice(i, i + p).reduce((a, b) => a + b, 0) / p,
+    const dmaTimes = dmaSource.map((c) => c.time as any);
+    const makeDailySMA = (p: number) =>
+      Array.from({ length: dmaCloses.length - p + 1 }, (_, i) => ({
+        time: dmaTimes[i + p - 1],
+        value: dmaCloses.slice(i, i + p).reduce((a, b) => a + b, 0) / p,
       }));
+    const firstTime = candles[0]?.time ?? 0;
 
-    if (candles.length >= 50) {
-      const sma50 = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      sma50.setData(makeSMA(50));
-    }
-    if (candles.length >= 200) {
-      const sma200 = chart.addSeries(LineSeries, { color: "#8b5cf6", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      sma200.setData(makeSMA(200));
+    if (interval === "1d") {
+      // Trend lines for daily charts, trimmed to the visible date range
+      if (dmaCloses.length >= 50) {
+        const dma50 = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+        dma50.setData(makeDailySMA(50).filter((p) => (p.time as number) >= firstTime));
+      }
+      if (dmaCloses.length >= 200) {
+        const dma200 = chart.addSeries(LineSeries, { color: "#f97316", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+        dma200.setData(makeDailySMA(200).filter((p) => (p.time as number) >= firstTime));
+      }
+    } else {
+      // Intraday: show current DMA level as horizontal reference lines
+      if (dmaCloses.length >= 50) {
+        const val50 = dmaCloses.slice(-50).reduce((a, b) => a + b, 0) / 50;
+        candleSeries.createPriceLine({ price: val50, color: "#38bdf8", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "50 DMA" });
+      }
+      if (dmaCloses.length >= 200) {
+        const val200 = dmaCloses.slice(-200).reduce((a, b) => a + b, 0) / 200;
+        candleSeries.createPriceLine({ price: val200, color: "#f97316", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "200 DMA" });
+      }
     }
 
     chart.timeScale().fitContent();
@@ -365,7 +395,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, interval]);
+  }, [candles, dailyCandles, interval]);
 
   const handlePeriodChange = (p: ChartPeriod) => {
     setPeriod(p);
@@ -478,8 +508,8 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
             })}
           </div>
           <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-yellow-400" /> SMA50</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-violet-400" /> SMA200</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 rounded bg-sky-400" /> 50 DMA</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 rounded bg-orange-500" /> 200 DMA</span>
           </div>
         </div>
 
