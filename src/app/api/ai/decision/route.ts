@@ -38,7 +38,7 @@ const DecisionSchema = z.object({
     symbol: z.string(),
     action: z.enum(["SELL", "REDUCE_POSITION", "BOOK_PARTIAL_PROFITS"]),
     urgency: z.enum(["URGENT", "HIGH"]),
-    reasons: z.array(z.string()).min(3).max(5),
+    reasons: z.array(z.string()).max(5),
     confidence: z.number().min(0).max(100),
   })).max(5),
 
@@ -60,9 +60,9 @@ const DecisionSchema = z.object({
     action: z.enum(["BUY", "ACCUMULATE", "HOLD", "BOOK_PARTIAL_PROFITS", "REDUCE_POSITION", "SELL", "AVOID", "WAIT_AND_WATCH"]),
     confidence: z.number().min(0).max(100),
     urgency: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]),
-    reasons: z.array(z.string()).min(4).max(6),
-    risks: z.array(z.string()).min(2).max(3),
-    watchFor: z.array(z.string()).min(2).max(3),
+    reasons: z.array(z.string()).max(6),
+    risks: z.array(z.string()).max(3),
+    watchFor: z.array(z.string()).max(3),
     technical: TechSchema,
     finalVerdict: z.string(),
   })),
@@ -90,11 +90,13 @@ export async function GET(req: NextRequest) {
   if (holdings.length === 0)
     return NextResponse.json({ error: "No holdings found." }, { status: 400 });
 
-  // Fetch live quotes, technical snapshots, and news in parallel
+  // Fetch quotes + technicals always; news only for full AI (not quick/rule-based)
   const [quoteResults, techResults, newsResults] = await Promise.all([
     Promise.allSettled(holdings.map(h => getQuote(h.symbol, (h.exchange as Exchange) ?? "NSE"))),
     Promise.allSettled(holdings.map(h => getHoldingTechnicals(h.symbol, (h.exchange as Exchange) ?? "NSE"))),
-    Promise.allSettled(holdings.map(h => getStockNews(h.symbol, h.name))),
+    quick
+      ? Promise.resolve(holdings.map(() => ({ status: "fulfilled" as const, value: [] as NewsItem[] })))
+      : Promise.allSettled(holdings.map(h => getStockNews(h.symbol, h.name))),
   ]);
 
   // Build enriched holdings
