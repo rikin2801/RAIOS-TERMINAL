@@ -175,11 +175,27 @@ export default function PortfolioManagerPage() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<"actions" | "attention" | "all">("actions");
 
-  const refresh = useCallback(async (useCache = true) => {
+  const refresh = useCallback(async (force = false) => {
     if (!activePortfolioId || activePortfolioId === ALL_PORTFOLIOS_ID) return;
-    setLoading(true); setError(null);
+    setError(null);
+
+    // Phase 1: show rule-based decisions immediately so the page isn't blank
+    if (!decision) {
+      setLoading(true);
+      try {
+        const quickUrl = `/api/ai/decision?portfolioId=${activePortfolioId}&quick=1`;
+        const quickRes = await fetch(quickUrl);
+        if (quickRes.ok) {
+          const quick = await quickRes.json();
+          if (!quick.error) { setDecision(quick); setDataSource(quick.source ?? "rule-based"); }
+        }
+      } catch { /* ignore — fall through to full AI */ }
+      setLoading(false);
+    }
+
+    // Phase 2: full AI analysis in background (uses 5-min in-memory cache unless forced)
     try {
-      const url = `/api/ai/decision?portfolioId=${activePortfolioId}${useCache ? "&quick=0" : "&force=1"}`;
+      const url = `/api/ai/decision?portfolioId=${activePortfolioId}${force ? "&force=1" : ""}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(await res.text());
       const d = await res.json();
@@ -189,13 +205,12 @@ export default function PortfolioManagerPage() {
       setAiError(d.aiError ?? null);
       setLastRefreshed(new Date());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load AI analysis.");
-    } finally {
-      setLoading(false);
+      // Keep showing rule-based data; just flag the AI error
+      setAiError(e instanceof Error ? e.message : "Full AI analysis failed — showing technical rules.");
     }
-  }, [activePortfolioId]);
+  }, [activePortfolioId, decision]);
 
-  useEffect(() => { refresh(true); }, [refresh]);
+  useEffect(() => { refresh(false); }, [activePortfolioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
@@ -254,7 +269,7 @@ export default function PortfolioManagerPage() {
               {lastRefreshed.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
-          <button onClick={() => refresh(false)} disabled={loading}
+          <button onClick={() => refresh(true)} disabled={loading}
             className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground border border-border rounded-md px-3 py-1.5 transition-colors hover:bg-accent">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Analysing…" : "Refresh"}
