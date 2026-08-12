@@ -532,32 +532,26 @@ export default function PortfolioPage() {
               : `${activePortfolio?.name ?? "Default"} · ${holdings.length} holdings · NSE/BSE`}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           {activeTab === "holdings" && activePortfolioId !== ALL_PORTFOLIOS_ID && (
             <>
-              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
-                <FileSpreadsheet className="h-4 w-4" /> Template
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => csvRef.current?.click()}>
-                <Upload className="h-4 w-4" /> CSV
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => xlsxRef.current?.click()}>
-                <Upload className="h-4 w-4" /> Excel
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={holdings.length === 0}>
-                <Download className="h-4 w-4" /> Export CSV
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={holdings.length === 0}>
-                <Download className="h-4 w-4" /> Export Excel
-              </Button>
               <input ref={csvRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV} />
               <input ref={xlsxRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
+              {/* Collapsed Import / Export dropdown */}
+              <ImportExportMenu
+                onTemplate={handleDownloadTemplate}
+                onImportCSV={() => csvRef.current?.click()}
+                onImportExcel={() => xlsxRef.current?.click()}
+                onExportCSV={handleExportCSV}
+                onExportExcel={handleExportExcel}
+                hasHoldings={holdings.length > 0}
+              />
               <Button variant="outline" size="sm" onClick={analyzeAll} disabled={analyzingAll || holdings.length === 0}>
-                {analyzingAll ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-                {analyzingAll ? (analyzingSymbol ? `Analyzing ${analyzingSymbol}…` : "Analyzing…") : "AI Analyze All"}
+                {analyzingAll ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+                {analyzingAll ? (analyzingSymbol ? `${analyzingSymbol}…` : "Analyzing…") : "AI Analyse All"}
               </Button>
               <Button size="sm" onClick={() => setShowAdd(true)}>
-                <Plus className="h-4 w-4" /> Add Holding
+                <Plus className="h-3.5 w-3.5" /> Add Holding
               </Button>
             </>
           )}
@@ -930,6 +924,53 @@ export default function PortfolioPage() {
           name={chartSymbol.name}
           onClose={() => setChartSymbol(null)}
         />
+      )}
+    </div>
+  );
+}
+
+function ImportExportMenu({
+  onTemplate, onImportCSV, onImportExcel, onExportCSV, onExportExcel, hasHoldings,
+}: {
+  onTemplate: () => void;
+  onImportCSV: () => void;
+  onImportExcel: () => void;
+  onExportCSV: () => void;
+  onExportExcel: () => void;
+  hasHoldings: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <Button variant="outline" size="sm" onClick={() => setOpen(v => !v)}>
+        <FileSpreadsheet className="h-3.5 w-3.5" />
+        Import / Export
+        <ChevronDown className="h-3 w-3 ml-1" />
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-lg border border-border bg-card shadow-lg py-1 text-xs">
+            <p className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Import</p>
+            <button onClick={() => { onTemplate(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left">
+              <FileSpreadsheet className="h-3.5 w-3.5 text-muted-foreground" /> Download Template
+            </button>
+            <button onClick={() => { onImportCSV(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left">
+              <Upload className="h-3.5 w-3.5 text-muted-foreground" /> Import CSV
+            </button>
+            <button onClick={() => { onImportExcel(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left">
+              <Upload className="h-3.5 w-3.5 text-muted-foreground" /> Import Excel
+            </button>
+            <div className="my-1 border-t border-border" />
+            <p className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Export</p>
+            <button onClick={() => { onExportCSV(); setOpen(false); }} disabled={!hasHoldings} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left disabled:opacity-40">
+              <Download className="h-3.5 w-3.5 text-muted-foreground" /> Export CSV
+            </button>
+            <button onClick={() => { onExportExcel(); setOpen(false); }} disabled={!hasHoldings} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent text-left disabled:opacity-40">
+              <Download className="h-3.5 w-3.5 text-muted-foreground" /> Export Excel
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

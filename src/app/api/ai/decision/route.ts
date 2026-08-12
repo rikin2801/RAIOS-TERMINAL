@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { holdingWhere } from "@/lib/portfolio";
 import { getQuote, getHoldingTechnicals } from "@/lib/market";
 import type { HoldingTechnicals } from "@/lib/market";
+import { getStockNews, formatNewsForPrompt } from "@/lib/news";
+import type { NewsItem } from "@/lib/news";
 import type { Exchange } from "@/lib/india";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
@@ -88,10 +90,11 @@ export async function GET(req: NextRequest) {
   if (holdings.length === 0)
     return NextResponse.json({ error: "No holdings found." }, { status: 400 });
 
-  // Fetch live quotes + technical snapshots in parallel
-  const [quoteResults, techResults] = await Promise.all([
+  // Fetch live quotes, technical snapshots, and news in parallel
+  const [quoteResults, techResults, newsResults] = await Promise.all([
     Promise.allSettled(holdings.map(h => getQuote(h.symbol, (h.exchange as Exchange) ?? "NSE"))),
     Promise.allSettled(holdings.map(h => getHoldingTechnicals(h.symbol, (h.exchange as Exchange) ?? "NSE"))),
+    Promise.allSettled(holdings.map(h => getStockNews(h.symbol, h.name))),
   ]);
 
   // Build enriched holdings
@@ -105,6 +108,7 @@ export async function GET(req: NextRequest) {
     symbol: string; name: string; sector: string | null; shares: number; avgCost: number;
     currentPrice: number; changePercent: number; weight: number;
     tech: HoldingTechnicals | null;
+    news: NewsItem[];
   };
 
   const enriched: Enriched[] = holdings.map((h, i) => {
@@ -112,6 +116,8 @@ export async function GET(req: NextRequest) {
       ? (quoteResults[i] as PromiseFulfilledResult<Awaited<ReturnType<typeof getQuote>>>).value : null;
     const t = techResults[i].status === "fulfilled"
       ? (techResults[i] as PromiseFulfilledResult<HoldingTechnicals | null>).value : null;
+    const n = newsResults[i].status === "fulfilled"
+      ? (newsResults[i] as PromiseFulfilledResult<NewsItem[]>).value : [];
     const price = q?.price ?? h.avgCost;
     return {
       symbol: h.symbol, name: h.name, sector: h.sector, shares: h.shares, avgCost: h.avgCost,
@@ -119,6 +125,7 @@ export async function GET(req: NextRequest) {
       changePercent: q?.changePercent ?? 0,
       weight: totalValue > 0 ? (price * h.shares / totalValue) * 100 : 0,
       tech: t,
+      news: n,
     };
   });
 
@@ -141,9 +148,13 @@ export async function GET(req: NextRequest) {
     const techLine = t
       ? `Daily:${t.dailyTrend} | Weekly:${t.weeklyTrend} | Monthly:${t.monthlyTrend} | RSI:${t.rsi} | MACD:${t.macdLabel} | Stoch:${t.stochasticLabel} | Vol:${t.volumeLabel} | Momentum:${t.momentumLabel} | SMA50:${t.aboveSma50 ? "Above" : "Below"} | SMA200:${t.aboveSma200 ? "Above" : "Below"} | Support:₹${t.support} | Resistance:₹${t.resistance}`
       : "Technical data unavailable — use market knowledge";
+    const newsLine = h.news.length > 0
+      ? `  NEWS (${h.news.length} headlines):\n${h.news.slice(0, 5).map(n => `    • "${n.title}" — ${n.source}${n.ago ? `, ${n.ago}` : ""}`).join("\n")}`
+      : "  NEWS: No recent headlines";
     return `${h.symbol} (${h.sector ?? "Diversified"})
   Price: ₹${h.currentPrice.toFixed(0)} (${h.changePercent >= 0 ? "+" : ""}${h.changePercent.toFixed(2)}% today) | Weight: ${h.weight.toFixed(1)}%
-  ${techLine}`;
+  TECHNICALS: ${techLine}
+${newsLine}`;
   }).join("\n\n");
 
   const prompt = `You are RAIOS — a seasoned Indian equity Investment Manager with 25 years of experience managing institutional portfolios.
@@ -159,7 +170,17 @@ CORE PHILOSOPHY — READ BEFORE EVERY DECISION:
 5. Think and speak like a fund manager — give insight, not just data.
 6. NEVER mention share quantities, capital amounts, or portfolio percentages in finalVerdict or reasons.
 
-PORTFOLIO HOLDINGS WITH LIVE TECHNICAL DATA:
+NEWS ANALYSIS PHILOSOPHY:
+For each stock's news headlines, you MUST assess the FUNDAMENTAL IMPACT CHAIN before giving your recommendation:
+  News Event → Business Effect → Financial Effect → Stock Price Effect
+Examples:
+  "Company wins ₹1,000 Cr order" → Revenue visibility improves → EPS estimate rises → Re-rating likely → BULLISH
+  "Govt raises import duty on raw material" → Input costs rise → Margin squeeze → Earnings miss risk → BEARISH
+  "Q1 results this week" → Uncertainty ahead → Wait for clarity → Reduce risk before results
+  "Management changes leadership" → Execution risk rises → Confidence dent → WATCH carefully
+When news CONFIRMS the technical trend → INCREASE confidence. When news CONTRADICTS the technical trend → FLAG THE CONFLICT and lower confidence. Always cite the specific headline in your reasons.
+
+PORTFOLIO HOLDINGS WITH LIVE TECHNICALS AND NEWS:
 ${holdingsBlock}
 
 ═══════════════════════════════════════════════
@@ -241,6 +262,7 @@ type Enriched = {
   symbol: string; name: string; sector: string | null; shares: number; avgCost: number;
   currentPrice: number; changePercent: number; weight: number;
   tech: HoldingTechnicals | null;
+  news: NewsItem[];
 };
 
 function buildRuleBased(holdings: Enriched[], dayChange: number): DecisionData {

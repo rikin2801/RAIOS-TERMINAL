@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getQuote, getHistoricalData, getFundamentals, type AnalysisTimeframe } from "@/lib/market";
 import { calculateAllIndicators } from "@/lib/technical";
 import { runAIAnalysis } from "@/lib/ai-analysis";
+import { getStockNews } from "@/lib/news";
 import { prisma } from "@/lib/prisma";
 import { resolvePortfolioId } from "@/lib/portfolio";
 import type { Exchange } from "@/lib/india";
@@ -68,7 +69,10 @@ export async function GET(
     }
 
     const indicators = calculateAllIndicators(historical);
-    const analysis = await runAIAnalysis(quote, indicators, fundamentals);
+
+    // Fetch news in parallel with indicator calculation (non-blocking — empty array on failure)
+    const news = await getStockNews(symbol, quote.name ?? symbol).catch(() => []);
+    const analysis = await runAIAnalysis(quote, indicators, fundamentals, news);
 
     const rawMetrics = { indicators, fundamentals, quote: { price: quote.price, change: quote.changePercent } };
 

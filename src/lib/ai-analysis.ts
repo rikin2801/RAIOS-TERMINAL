@@ -2,6 +2,8 @@ import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import type { AIAnalysisResult, TechnicalIndicators, FundamentalData, MarketQuote } from "@/types";
+import type { NewsItem } from "@/lib/news";
+import { formatNewsForPrompt } from "@/lib/news";
 
 const IndicatorDetailSchema = z.object({
   value: z.string(),
@@ -52,7 +54,8 @@ const AnalysisSchema = z.object({
 export async function runAIAnalysis(
   quote: MarketQuote,
   technicals: TechnicalIndicators,
-  fundamentals: FundamentalData | null
+  fundamentals: FundamentalData | null,
+  news?: NewsItem[]
 ): Promise<AIAnalysisResult> {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey || apiKey === "your-gemini-api-key-here") {
@@ -60,7 +63,7 @@ export async function runAIAnalysis(
   }
 
   const google = createGoogleGenerativeAI({ apiKey });
-  const prompt = buildPrompt(quote, technicals, fundamentals);
+  const prompt = buildPrompt(quote, technicals, fundamentals, news);
 
   try {
     const { object } = await generateObject({
@@ -80,9 +83,34 @@ export async function runAIAnalysis(
 function buildPrompt(
   quote: MarketQuote,
   tech: TechnicalIndicators,
-  fund: FundamentalData | null
+  fund: FundamentalData | null,
+  news?: NewsItem[]
 ): string {
   const fmt = (v: number) => `₹${v.toFixed(2)}`;
+  const hasNews = news && news.length > 0;
+  const newsSection = hasNews
+    ? `
+RECENT NEWS (last 7 days) — ${news!.length} headlines:
+${formatNewsForPrompt(news!)}
+
+NEWS IMPACT ANALYSIS — YOU MUST DO THIS BEFORE GIVING ANY RECOMMENDATION:
+For each headline above, determine:
+1. IMPACT: Is this POSITIVE, NEGATIVE, or NEUTRAL for ${quote.symbol}?
+2. FUNDAMENTAL CHAIN: News → Business Effect → Financial Effect → Stock Price Effect
+   Example: "Govt raises import duty" → Higher input costs → Margin compression → Lower EPS forecast → Bearish
+   Example: "Company wins ₹500 Cr order" → Higher revenue → Better earnings visibility → Price re-rating → Bullish
+3. CATALYST: Does this create a near-term event risk? (earnings, policy change, regulatory action, election, rate decision)
+4. URGENCY: Does this news make acting NOW important vs. waiting?
+
+Then factor news into your analysis:
+- Cite specific headlines in bullishFactors or bearishFactors
+- Add news-driven risks to the risks list (upcoming results, regulatory uncertainty, macro events)
+- In whyNow: explain if a news catalyst makes this time-sensitive
+- Confidence: INCREASE if news CONFIRMS the technical signal. DECREASE if news CONTRADICTS it or creates major uncertainty
+- whatCouldInvalidate: include any news-driven scenarios that would flip the thesis
+`
+    : "\nRECENT NEWS: No news data available — analysis based on technicals and fundamentals only.\n";
+
   return `You are RAIOS, an expert Indian stock market investment analyst specializing in NSE/BSE companies. Analyze the following stock and provide a comprehensive, EXPLAINABLE investment recommendation.
 
 STOCK: ${quote.symbol} (${quote.name})
@@ -109,24 +137,24 @@ ${fund ? `FUNDAMENTAL DATA:
 - Net Margin: ${fund.netMargin ? (fund.netMargin * 100).toFixed(1) + "%" : "N/A"}
 - Dividend Yield: ${fund.dividendYield ? (fund.dividendYield * 100).toFixed(2) + "%" : "N/A"}
 - Free Cash Flow: ${fund.freeCashFlow ? "₹" + (fund.freeCashFlow / 1e7).toFixed(2) + " Cr" : "N/A"}` : "FUNDAMENTAL DATA: Not available"}
-
+${newsSection}
 Indian market context: SEBI regulations, FII/DII activity, RBI monetary policy, NSE/BSE listed.
 
 Provide a COMPLETE EXPLAINABLE analysis with:
 1. signal: BUY/ACCUMULATE/HOLD/REDUCE/SELL
-2. confidence 0-100
+2. confidence 0-100 (adjust based on whether news confirms or contradicts technicals)
 3. investmentScore 0-10
-4. 3-4 specific risks (India-market aware)
-5. 2-4 bullish factors (specific to this stock/sector)
-6. 2-4 bearish factors
+4. 3-4 specific risks (India-market aware; include news-driven risks if applicable)
+5. 2-4 bullish factors (cite specific news headlines if they support the bull case)
+6. 2-4 bearish factors (cite specific news headlines if they support the bear case)
 7. entryZone (₹ price range)
 8. stopLoss (₹ price)
 9. targetPrice (12-month, ₹)
-10. summary (2-3 sentences, professional)
+10. summary (2-3 sentences; mention key news catalyst if any)
 11. recommendation (full sentence: "I recommend BUY because...")
-12. reasoning (WHY this recommendation — explain the logic chain)
-13. whyNow (WHY this is actionable at the current price and technical setup)
-14. whatCouldInvalidate (what scenario would reverse this recommendation)
+12. reasoning (WHY this recommendation — explain the full logic chain: technicals + fundamentals + news combined)
+13. whyNow (WHY this is actionable NOW — is there a news catalyst creating urgency or a time window?)
+14. whatCouldInvalidate (what scenario would reverse this; include news-driven scenarios)
 15. holdingPeriod (specific: "3-6 months", "12-18 months", etc.)
 16. expectedReward (upside scenario with ₹ targets)
 17. expectedRisk (downside scenario with ₹ targets)
@@ -137,7 +165,7 @@ Provide a COMPLETE EXPLAINABLE analysis with:
 19. fundamentalSnapshot: For each available fundamental, same format
 
 Make the reasoning TRANSPARENT and EDUCATIONAL so the investor understands exactly why you reached this conclusion.
-All prices in ₹. Be specific and data-driven.`;
+All prices in ₹. Be specific and data-driven. When news is present, your analysis MUST reference the most impactful headlines by name.`;
 }
 
 function getMockAnalysis(

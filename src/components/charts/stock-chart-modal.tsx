@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Newspaper, ExternalLink } from "lucide-react";
+import type { NewsItem } from "@/app/api/market/news/route";
 import {
   createChart,
   CandlestickSeries,
@@ -250,6 +251,9 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
   const [showRSI, setShowRSI] = useState(true);
   const [showMACD, setShowMACD] = useState(true);
   const [showStoch, setShowStoch] = useState(true);
+  const [showNews, setShowNews] = useState(false);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [dailyCandles, setDailyCandles] = useState<Candle[]>([]);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -295,6 +299,18 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
   }, [symbol, exchange, period, interval]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Fetch news once per symbol (cached 15 min server-side)
+  useEffect(() => {
+    let cancelled = false;
+    setNewsLoading(true);
+    fetch(`/api/market/news?symbol=${encodeURIComponent(symbol)}&name=${encodeURIComponent(name ?? symbol)}`)
+      .then((r) => r.json())
+      .then((data: NewsItem[]) => { if (!cancelled) setNewsItems(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setNewsLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol, name]);
 
   useEffect(() => {
     if (!chartContainerRef.current || candles.length === 0) return;
@@ -581,12 +597,12 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
           {/* Indicators section — takes 55% of content area */}
           <div className="flex flex-col" style={{ flex: "0 0 55%", minHeight: 0 }}>
             {/* Toggle bar */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0 flex-wrap">
               <span className="text-xs text-muted-foreground">Indicators</span>
               {[
-                { label: "RSI (14)", active: showRSI, toggle: () => setShowRSI((v) => !v) },
-                { label: "MACD",     active: showMACD, toggle: () => setShowMACD((v) => !v) },
-                { label: "Stoch",    active: showStoch, toggle: () => setShowStoch((v) => !v) },
+                { label: "RSI (14)", active: showRSI && !showNews, toggle: () => { setShowNews(false); setShowRSI((v) => !v); } },
+                { label: "MACD",     active: showMACD && !showNews, toggle: () => { setShowNews(false); setShowMACD((v) => !v); } },
+                { label: "Stoch",    active: showStoch && !showNews, toggle: () => { setShowNews(false); setShowStoch((v) => !v); } },
               ].map((ind) => (
                 <button
                   key={ind.label}
@@ -600,12 +616,72 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                   {ind.label}
                 </button>
               ))}
-              <span className="ml-auto text-[10px] text-muted-foreground">Scroll ↓ for all</span>
+              <div className="w-px h-4 bg-border mx-1" />
+              <button
+                onClick={() => setShowNews((v) => !v)}
+                className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded border transition-colors ${
+                  showNews
+                    ? "border-amber-500 text-amber-400 bg-amber-500/10"
+                    : "border-border text-muted-foreground hover:border-muted-foreground"
+                }`}
+              >
+                <Newspaper className="h-3 w-3" />
+                News
+                {newsItems.length > 0 && (
+                  <span className="ml-0.5 bg-amber-500/20 text-amber-400 text-[10px] px-1 rounded-full">
+                    {newsItems.length}
+                  </span>
+                )}
+              </button>
+              {!showNews && <span className="ml-auto text-[10px] text-muted-foreground">Scroll ↓ for all</span>}
             </div>
 
-            {/* Scrollable indicator charts */}
+            {/* Scrollable indicator charts / news */}
             <div className="flex-1 overflow-y-auto min-h-0">
-              {indicatorData.length > 0 && (showRSI || showMACD || showStoch) ? (
+              {/* ── News Panel ── */}
+              {showNews && (
+                <div className="px-4 py-3 space-y-2">
+                  {newsLoading && newsItems.length === 0 ? (
+                    <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Loading news…</span>
+                    </div>
+                  ) : newsItems.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                      <Newspaper className="h-8 w-8 mb-2 opacity-30" />
+                      <p className="text-sm">No recent news found</p>
+                    </div>
+                  ) : (
+                    newsItems.map((item, i) => (
+                      <a
+                        key={i}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-3 p-2.5 rounded-lg border border-border/50 hover:border-border hover:bg-accent/40 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+                            {item.title}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[140px]">
+                              {item.source}
+                            </span>
+                            {item.ago && (
+                              <span className="text-[10px] text-muted-foreground/60">{item.ago}</span>
+                            )}
+                          </div>
+                        </div>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 mt-0.5 transition-colors" />
+                      </a>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* ── Indicator Charts ── */}
+              {!showNews && indicatorData.length > 0 && (showRSI || showMACD || showStoch) ? (
                 <>
                   {showRSI && (
                     <div className="px-2 pt-3 pb-1">
@@ -687,7 +763,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                     </div>
                   )}
                 </>
-              ) : !loading && indicatorData.length === 0 ? (
+              ) : !showNews && !loading && indicatorData.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                   Not enough data for indicators
                 </div>
