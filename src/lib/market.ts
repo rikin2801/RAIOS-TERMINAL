@@ -1,6 +1,7 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketQuote } from "@/types";
 import { toYahooSymbol, fromYahooSymbol, type Exchange } from "./india";
+import { getNSEQuote } from "./nse";
 import {
   calculateRSI, calculateMACD, calculateStochastic,
   calculateSMA, findSupportResistance,
@@ -8,14 +9,8 @@ import {
 
 const yf = new YahooFinance();
 
-// 60-second in-process cache — prevents Yahoo Finance rate-limiting when
-// multiple AI routes (brief, decision, portfolio-manager) call getQuote
-// for the same holdings within the same page load.
 const _quoteCache = new Map<string, { data: MarketQuote; ts: number }>();
 const QUOTE_TTL_MS = 60_000;
-
-// Deduplicate in-flight requests for the same symbol so concurrent callers
-// share a single Yahoo Finance fetch rather than each making their own.
 const _inFlight = new Map<string, Promise<MarketQuote>>();
 
 export async function getQuote(symbol: string, exchange: Exchange = "NSE"): Promise<MarketQuote> {
@@ -28,6 +23,36 @@ export async function getQuote(symbol: string, exchange: Exchange = "NSE"): Prom
   if (existing) return existing;
 
   const req = (async () => {
+    // ── Try NSE first for real-time prices (NSE stocks only) ──────────────
+    if (exchange === "NSE") {
+      try {
+        const nse = await getNSEQuote(symbol);
+        if (nse.lastPrice > 0) {
+          const result: MarketQuote = {
+            symbol: nse.symbol,
+            name: nse.companyName,
+            price: nse.lastPrice,
+            open: nse.open,
+            high: nse.dayHigh,
+            low: nse.dayLow,
+            previousClose: nse.previousClose,
+            volume: nse.totalTradedVolume,
+            change: nse.change,
+            changePercent: nse.pChange,
+            fiftyTwoWeekHigh: nse.weekHigh52,
+            fiftyTwoWeekLow: nse.weekLow52,
+            // fundamentals remain from Yahoo Finance via getFundamentals()
+          };
+          _quoteCache.set(key, { data: result, ts: Date.now() });
+          _inFlight.delete(key);
+          return result;
+        }
+      } catch {
+        // NSE blocked or unavailable — fall through to Yahoo Finance
+      }
+    }
+
+    // ── Yahoo Finance fallback ─────────────────────────────────────────────
     const yahooSymbol = toYahooSymbol(symbol, exchange);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const quote: any = await yf.quote(yahooSymbol, {}, { validateResult: false });

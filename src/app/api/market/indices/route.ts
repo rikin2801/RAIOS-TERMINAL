@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import YahooFinance from "yahoo-finance2";
+import { getNSEIndices } from "@/lib/nse";
 
 const yf = new YahooFinance();
-
-let cache: { data: IndexQuote[]; ts: number } | null = null;
-const TTL = 60_000; // 60s
 
 export interface IndexQuote {
   symbol: string;
@@ -17,20 +15,41 @@ export interface IndexQuote {
   low: number;
 }
 
-const INDICES = [
+// Yahoo Finance fallback symbols for when NSE is unavailable
+const YF_INDICES = [
   { symbol: "^NSEI",    name: "Nifty 50" },
   { symbol: "^BSESN",  name: "Sensex" },
-  { symbol: "^NSEBANK", name: "BankNifty" },
+  { symbol: "^NSEBANK", name: "Bank Nifty" },
   { symbol: "^CNXIT",  name: "Nifty IT" },
 ];
 
-export async function GET() {
-  if (cache && Date.now() - cache.ts < TTL) {
-    return NextResponse.json(cache.data);
-  }
+// NSE index symbol → display name mapping
+const NSE_NAME_MAP: Record<string, string> = {
+  "NIFTY 50":   "Nifty 50",
+  "NIFTY BANK": "Bank Nifty",
+  "NIFTY IT":   "Nifty IT",
+};
 
+let cache: { data: IndexQuote[]; ts: number } | null = null;
+const TTL = 60_000;
+
+async function fromNSE(): Promise<IndexQuote[]> {
+  const indices = await getNSEIndices();
+  return indices.map((i) => ({
+    symbol: i.name,
+    name: NSE_NAME_MAP[i.name] ?? i.name,
+    price: i.lastPrice,
+    change: i.change,
+    changePercent: i.pChange,
+    open: i.open,
+    high: i.high,
+    low: i.low,
+  }));
+}
+
+async function fromYahoo(): Promise<IndexQuote[]> {
   const results = await Promise.allSettled(
-    INDICES.map(async ({ symbol, name }) => {
+    YF_INDICES.map(async ({ symbol, name }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const q: any = await yf.quote(symbol, {}, { validateResult: false });
       return {
@@ -45,11 +64,30 @@ export async function GET() {
       } satisfies IndexQuote;
     })
   );
-
-  const data = results
+  return results
     .filter((r): r is PromiseFulfilledResult<IndexQuote> => r.status === "fulfilled")
     .map((r) => r.value)
     .filter((q) => q.price > 0);
+}
+
+export async function GET() {
+  if (cache && Date.now() - cache.ts < TTL) {
+    return NextResponse.json(cache.data);
+  }
+
+  // Try NSE first (real-time), fall back to Yahoo Finance (15-min delayed)
+  let data: IndexQuote[] = [];
+  try {
+    data = await fromNSE();
+  } catch {
+    try {
+      data = await fromYahoo();
+    } catch {
+      // both failed — return stale cache if available
+      if (cache) return NextResponse.json(cache.data);
+      return NextResponse.json([]);
+    }
+  }
 
   if (data.length > 0) {
     cache = { data, ts: Date.now() };
