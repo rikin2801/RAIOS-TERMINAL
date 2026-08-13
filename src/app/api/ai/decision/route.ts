@@ -267,13 +267,81 @@ type Enriched = {
   news: NewsItem[];
 };
 
+// ETFs that track commodities or indices — short-term dips = buy opportunities, never SELL
+const COMMODITY_ETF_SYMBOLS = new Set([
+  "GOLDBEES", "SILVERBEES", "LIQUIDBEES", "JUNIORBEES", "BANKBEES",
+  "NIFTYBEES", "SETFNN50", "ICICIB22", "CPSEETF", "BHARAT22ETF",
+  "PSUBNKBEES", "MAFANG", "MOMOMENTUM",
+]);
+function isCommodityETF(symbol: string) {
+  return COMMODITY_ETF_SYMBOLS.has(symbol.toUpperCase()) || symbol.toUpperCase().endsWith("BEES") || symbol.toUpperCase().endsWith("ETF");
+}
+
 function buildRuleBased(holdings: Enriched[], dayChange: number): DecisionData {
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   const todayDecisions = holdings.map(h => {
     const t = h.tech;
 
-    // Score technical strength (0-10)
+    type Action = DecisionData["todayDecisions"][0]["action"];
+    type Urgency = DecisionData["todayDecisions"][0]["urgency"];
+    let action: Action, urgency: Urgency, confidence: number;
+    let reasons: string[], risks: string[], watchFor: string[], finalVerdict: string;
+
+    // ── Commodity / Index ETFs: dips = accumulate, never SELL ───────────────
+    if (isCommodityETF(h.symbol)) {
+      const isLiquid = h.symbol.toUpperCase() === "LIQUIDBEES";
+      if (isLiquid) {
+        action = "HOLD"; urgency = "LOW"; confidence = 90;
+        reasons = [
+          "LIQUIDBEES is a liquid fund equivalent — capital preservation, not growth",
+          "Suitable for parking idle cash — no buy/sell decision needed",
+          "Returns track overnight rates; no technical trend analysis applies",
+        ];
+        risks = ["Not a long-term wealth-creation instrument — redeploy into equities when opportunities arise"];
+        watchFor = ["Better equity entry points to redeploy this capital"];
+        finalVerdict = "LIQUIDBEES serves as a cash parking instrument. Hold as a liquidity buffer and redeploy into equities when a good entry presents itself.";
+      } else if (t && t.dailyTrend === "Bearish" && t.rsi < 45) {
+        action = "ACCUMULATE"; urgency = "MEDIUM"; confidence = 72;
+        reasons = [
+          `${h.symbol} is pulling back — short-term dips in commodity ETFs are accumulation opportunities, not exit signals`,
+          `RSI at ${t.rsi} entering oversold territory — historically a good zone to add`,
+          "Commodity ETFs track underlying asset prices (gold/silver/index) — short-term technical weakness ≠ fundamental deterioration",
+          "Long-term investors use dips to lower average cost, not to exit the asset class",
+        ];
+        risks = ["Dip could extend further if global commodity prices correct sharply", "Currency movement (INR/USD) can affect gold ETF returns independently of gold price"];
+        watchFor = ["RSI recovering above 50 — confirms the dip is being bought", "Global commodity price trend — the underlying driver"];
+        finalVerdict = `${h.symbol} is experiencing a short-term pullback. For commodity/index ETFs, dips are accumulation opportunities. Consider adding to your position at current levels rather than selling.`;
+      } else if (t && t.dailyTrend === "Bullish" && t.rsi > 72) {
+        action = "HOLD"; urgency = "LOW"; confidence = 68;
+        reasons = [
+          `${h.symbol} has run up — RSI at ${t.rsi} suggests the near-term move is stretched`,
+          "For commodity ETFs, trimming on overbought conditions is optional — only if rebalancing",
+          "Long-term holders should stay invested through short-term overbought readings",
+        ];
+        risks = ["Short-term mean reversion possible", "Currency risk for gold ETFs"];
+        watchFor = ["RSI pulling back to 55–60 — better add zone", "Underlying commodity price action"];
+        finalVerdict = `${h.symbol} is in a strong short-term move. Long-term holders should stay the course. Only trim if you need to rebalance your overall commodity allocation.`;
+      } else {
+        action = "HOLD"; urgency = "LOW"; confidence = 70;
+        reasons = [
+          `${h.symbol} is performing in line with the underlying commodity/index`,
+          "Commodity and index ETFs are long-term portfolio anchors — short-term trend signals don't drive decisions",
+          t?.aboveSma200 ? "Price above 200-day SMA — long-term uptrend intact" : "Below long-term average — monitor for accumulation opportunity",
+        ];
+        risks = ["Global macro shifts (interest rates, dollar strength) can impact commodity prices", "Currency movement affects gold/silver ETF returns"];
+        watchFor = ["Underlying commodity price trend", "INR/USD movement for gold and silver ETFs"];
+        finalVerdict = `${h.symbol} is a commodity/index ETF — hold as a long-term portfolio diversifier. Use meaningful dips (RSI below 45) to accumulate more.`;
+      }
+      return {
+        symbol: h.symbol, action, confidence, urgency,
+        reasons, risks, watchFor,
+        technical: techToSnapshot(h.tech),
+        finalVerdict,
+      };
+    }
+
+    // Score technical strength (0-10) for regular stocks
     let techScore = 5;
     if (t) {
       if (t.dailyTrend === "Bullish")   techScore += 1; else if (t.dailyTrend === "Bearish")   techScore -= 1;
@@ -285,11 +353,6 @@ function buildRuleBased(holdings: Enriched[], dayChange: number): DecisionData {
       if (t.macdLabel === "Positive")   techScore += 0.5; else if (t.macdLabel === "Negative") techScore -= 0.5;
       if (t.momentumLabel === "Strong") techScore += 0.5; else if (t.momentumLabel === "Weak") techScore -= 0.5;
     }
-
-    type Action = DecisionData["todayDecisions"][0]["action"];
-    type Urgency = DecisionData["todayDecisions"][0]["urgency"];
-    let action: Action, urgency: Urgency, confidence: number;
-    let reasons: string[], risks: string[], watchFor: string[], finalVerdict: string;
 
     if (t && t.dailyTrend === "Bearish" && t.weeklyTrend === "Bearish" && !t.aboveSma50) {
       // Technically broken down — SELL
