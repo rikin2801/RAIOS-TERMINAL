@@ -288,3 +288,36 @@ export interface Phase1AnalysisResult {
   fiftyTwoWeekLow: number;
   pe: number | null;
 }
+
+// ── Profit Booking Guidance ───────────────────────────────────────────────────
+
+export type ProfitBookingStatus = "LET_PROFITS_RUN" | "WATCH" | "ALERT" | "EXIT";
+
+export interface ProfitBookingTrigger {
+  name: string;
+  value: string;
+  tag: string;
+  severity: "green" | "amber" | "orange" | "red";
+}
+
+export interface ProfitBookingResult {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  fiftyTwoWeekHigh: number;
+  fiftyTwoWeekLow: number;
+  rangePosition: number;
+  status: ProfitBookingStatus;
+  indicators: {
+    rsi: number;
+    stochastic: number;
+    macdHistogram: number;
+    sma50: number;
+    sma200: number;
+  };
+  triggers: ProfitBookingTrigger[];
+  reasoning: string[];
+  suggestedAction: string;
+}

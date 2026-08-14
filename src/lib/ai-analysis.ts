@@ -512,3 +512,151 @@ export async function runPhase1Analysis(params: {
     return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
   }
 }
+
+// ── Profit Booking Analysis ───────────────────────────────────────────────────
+
+const ProfitBookingSchema = z.object({
+  reasoning: z.array(z.string()).length(4),
+  suggestedAction: z.string(),
+});
+
+function buildProfitBookingPrompt(params: {
+  symbol: string;
+  name: string;
+  status: string;
+  price: number;
+  rsi: number;
+  stochastic: number;
+  macdHistogram: number;
+  sma50: number;
+  sma200: number;
+  rangePosition: number;
+  fiftyTwoWeekHigh: number;
+}): string {
+  const { symbol, name, status, price, rsi, stochastic, macdHistogram, sma50, sma200, rangePosition, fiftyTwoWeekHigh } = params;
+  const aboveSMA50 = price > sma50;
+  const aboveSMA200 = price > sma200;
+  const isBooking = status !== "LET_PROFITS_RUN";
+
+  return `You are helping an Indian retail investor decide whether to book profits on ${symbol} (${name}).
+
+Current market data:
+- Price: ₹${price.toFixed(2)} (52W High: ₹${fiftyTwoWeekHigh.toFixed(0)}, at ${rangePosition.toFixed(0)}% of yearly range)
+- RSI 14-day: ${rsi.toFixed(1)} (>70 = extended, >80 = overbought)
+- Stochastic %K: ${stochastic.toFixed(1)} (>80 = overbought)
+- MACD Histogram: ${macdHistogram >= 0 ? "+" : ""}${macdHistogram.toFixed(3)} (positive = bullish momentum)
+- SMA 50: ₹${sma50.toFixed(0)} — price is ${aboveSMA50 ? "ABOVE (bullish)" : "BELOW (bearish)"}
+- SMA 200: ₹${sma200.toFixed(0)} — price is ${aboveSMA200 ? "ABOVE (bullish)" : "BELOW (bearish)"}
+- Status determined: ${status}
+
+Write exactly 4 points explaining ${isBooking ? "why the investor should consider booking profits" : "why they should continue holding and let profits run"}.
+Rules:
+- Plain English only — no technical jargon, no RSI/MACD abbreviations without explanation
+- Each point is 1–2 sentences max
+- Be specific to these exact numbers, not generic advice
+- Conversational tone, like a knowledgeable friend talking to someone who wears glasses and wants clear readable text
+- Do NOT give personalized investment advice — frame as "the data suggests" or "historically when..."
+
+Also write one suggestedAction sentence (specific, e.g. "Consider booking 25–30% of your position to lock in gains while keeping exposure").`;
+}
+
+function getProfitBookingFallback(params: {
+  status: string;
+  rsi: number;
+  stochastic: number;
+  macdHistogram: number;
+  rangePosition: number;
+  price: number;
+  sma50: number;
+}): { reasoning: string[]; suggestedAction: string } {
+  const { status, rsi, stochastic, macdHistogram, rangePosition, price, sma50 } = params;
+
+  if (status === "LET_PROFITS_RUN") {
+    return {
+      reasoning: [
+        `RSI at ${rsi.toFixed(1)} is in a healthy range — the stock has not yet entered the extended momentum zone where reversals become more likely.`,
+        `Stochastic at ${stochastic.toFixed(1)} shows the stock is not yet overbought. There is room for the trend to continue before short-term traders start taking profits.`,
+        macdHistogram > 0
+          ? "MACD momentum is positive, confirming buyers are still in control and the upward move is supported by momentum."
+          : "MACD momentum is neutral. There is no strong signal of a reversal yet.",
+        `At ${rangePosition.toFixed(0)}% of its yearly range, the stock has not approached its 52-week high zone where heavy selling pressure typically appears.`,
+      ],
+      suggestedAction: "Continue holding your full position — no profit booking signal is active right now.",
+    };
+  }
+
+  if (status === "WATCH") {
+    return {
+      reasoning: [
+        `RSI at ${rsi.toFixed(1)} is entering the extended zone. The stock has rallied well and buyers are showing early signs of fatigue.`,
+        `Stochastic at ${stochastic.toFixed(1)} is elevated, meaning the stock has been trading near the top of its recent price range for several days.`,
+        macdHistogram > 0
+          ? "MACD is still positive which is why this is a Watch and not an Alert — the underlying momentum is intact for now."
+          : "MACD momentum is weakening, which adds to the case for monitoring this position closely.",
+        `At ${rangePosition.toFixed(0)}% of its yearly range, the stock is approaching territory where more investors look to exit near yearly highs.`,
+      ],
+      suggestedAction: "Start monitoring closely — if RSI crosses 70 or Stochastic crosses 80, consider booking 20–25% of your position.",
+    };
+  }
+
+  if (status === "ALERT") {
+    return {
+      reasoning: [
+        `RSI at ${rsi.toFixed(1)} signals the stock is in overbought territory. Historically when RSI is this high, stocks tend to take a breather or pull back before the next leg up.`,
+        `Stochastic at ${stochastic.toFixed(1)} — above 80 — means the stock is trading near the very top of its short-term price range. Short-term traders typically start selling here.`,
+        `At ${rangePosition.toFixed(0)}% of its 52-week range, the stock is very close to its yearly high. This is a zone of heavy historical selling pressure.`,
+        macdHistogram > 0
+          ? "MACD momentum is still positive which means the trend has not fully broken — this is why partial booking (not full exit) is suggested."
+          : "MACD momentum is weakening, adding further weight to the profit booking signal.",
+      ],
+      suggestedAction: "Consider booking 25–30% of your position to lock in gains. Keep the rest — if price holds above the SMA50, the trend may still have legs.",
+    };
+  }
+
+  // EXIT
+  return {
+    reasoning: [
+      `RSI at ${rsi.toFixed(1)} and Stochastic at ${stochastic.toFixed(1)} together signal an extremely overbought condition — both indicators are flashing caution at the same time.`,
+      price < sma50
+        ? "The stock has dropped below its 50-day average, which is a key warning signal that the short-term trend may have reversed."
+        : `At ${rangePosition.toFixed(0)}% of its 52-week range, the stock is extremely close to its yearly high — a zone where the risk-reward for holding is unfavourable.`,
+      macdHistogram < 0
+        ? "MACD momentum has turned negative — sellers are now in control on a short-term basis."
+        : "Even with positive MACD, the other signals are strong enough to warrant protecting your gains.",
+      "When multiple indicators align like this, the data suggests it is prudent to protect a significant portion of your profits rather than risking giving them back.",
+    ],
+    suggestedAction: "Consider booking 40–50% of your position to significantly protect your gains, and review the remaining position if the price continues to weaken.",
+  };
+}
+
+export async function runProfitBookingAnalysis(params: {
+  symbol: string;
+  name: string;
+  status: string;
+  price: number;
+  rsi: number;
+  stochastic: number;
+  macdHistogram: number;
+  sma50: number;
+  sma200: number;
+  rangePosition: number;
+  fiftyTwoWeekHigh: number;
+}): Promise<{ reasoning: string[]; suggestedAction: string }> {
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!apiKey || apiKey === "your-gemini-api-key-here") {
+    return getProfitBookingFallback(params);
+  }
+
+  const google = createGoogleGenerativeAI({ apiKey });
+  try {
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: ProfitBookingSchema,
+      prompt: buildProfitBookingPrompt(params),
+    });
+    return object;
+  } catch {
+    console.warn("[profit-booking] Gemini error, using fallback");
+    return getProfitBookingFallback(params);
+  }
+}

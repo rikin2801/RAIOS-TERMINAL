@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePortfolio, ALL_PORTFOLIOS_ID } from "@/contexts/portfolio-context";
 import { formatCurrency } from "@/lib/utils";
-import type { Holding, Phase1AnalysisResult } from "@/types";
+import type { Holding, Phase1AnalysisResult, ProfitBookingResult, ProfitBookingStatus } from "@/types";
 import {
   TrendingUp, TrendingDown, Minus, RefreshCw, BrainCircuit,
-  ChevronDown, ChevronUp, AlertCircle,
+  ChevronDown, ChevronUp, AlertCircle, TrendingDown as BookIcon,
 } from "lucide-react";
 
 // ── shared Phase1Card component (also exported for Search page) ───────────────
@@ -310,6 +310,242 @@ export function Phase1CardBody({
   );
 }
 
+// ── Profit Booking components ─────────────────────────────────────────────────
+
+export const PB_STATUS: Record<ProfitBookingStatus, {
+  emoji: string; label: string;
+  stripe: string; heroBg: string; heroBorder: string; heroText: string;
+  badgeBg: string; badgeText: string; badgeBorder: string;
+}> = {
+  LET_PROFITS_RUN: {
+    emoji: "🟢", label: "Let Profits Run",
+    stripe: "bg-green-500",
+    heroBg: "bg-green-950/40", heroBorder: "border-green-800/40", heroText: "text-green-400",
+    badgeBg: "bg-green-400/10", badgeText: "text-green-400", badgeBorder: "border-green-400/40",
+  },
+  WATCH: {
+    emoji: "🟡", label: "Profit Booking Watch",
+    stripe: "bg-amber-400",
+    heroBg: "bg-amber-950/40", heroBorder: "border-amber-700/40", heroText: "text-amber-400",
+    badgeBg: "bg-amber-400/10", badgeText: "text-amber-400", badgeBorder: "border-amber-400/40",
+  },
+  ALERT: {
+    emoji: "🟠", label: "Profit Booking Alert",
+    stripe: "bg-orange-500",
+    heroBg: "bg-orange-950/40", heroBorder: "border-orange-700/40", heroText: "text-orange-400",
+    badgeBg: "bg-orange-400/10", badgeText: "text-orange-400", badgeBorder: "border-orange-400/40",
+  },
+  EXIT: {
+    emoji: "🔴", label: "Protect / Exit Review",
+    stripe: "bg-red-500",
+    heroBg: "bg-red-950/40", heroBorder: "border-red-800/40", heroText: "text-red-400",
+    badgeBg: "bg-red-400/10", badgeText: "text-red-400", badgeBorder: "border-red-400/40",
+  },
+};
+
+const SEVERITY_CLS: Record<string, string> = {
+  green:  "text-green-400  bg-green-400/10  border-green-400/30",
+  amber:  "text-amber-400  bg-amber-400/10  border-amber-400/30",
+  orange: "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  red:    "text-red-400    bg-red-400/10    border-red-400/30",
+};
+
+function TriggerRow({ trigger }: { trigger: ProfitBookingResult["triggers"][0] }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+      <span className="text-sm font-semibold text-foreground">{trigger.name}</span>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-sm font-bold tabular-nums text-foreground">{trigger.value}</span>
+        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded border ${SEVERITY_CLS[trigger.severity]}`}>
+          {trigger.tag}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function ProfitBookingCardBody({
+  data,
+  holding,
+}: {
+  data: ProfitBookingResult;
+  holding?: { shares?: number; avgCost?: number; exchange?: string };
+}) {
+  const st = PB_STATUS[data.status];
+  const showPnL = holding?.shares && holding?.avgCost && data.price > 0;
+  const pnl    = showPnL ? holding!.shares! * (data.price - holding!.avgCost!) : 0;
+  const pnlPct = showPnL ? ((data.price - holding!.avgCost!) / holding!.avgCost!) * 100 : 0;
+  const rangeSpan = data.fiftyTwoWeekHigh - data.fiftyTwoWeekLow || 1;
+
+  return (
+    <div className="border-t border-border">
+      {/* Price + P&L strip */}
+      <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-4 border-b border-border">
+        <div>
+          {showPnL && (
+            <p className="text-xs text-muted-foreground">
+              {holding!.shares} shares · avg ₹{holding!.avgCost!.toFixed(0)} ·{" "}
+              <span className={`font-bold ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)} ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
+              </span>
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground mt-1">
+            52W ₹{data.fiftyTwoWeekLow.toFixed(0)} – ₹{data.fiftyTwoWeekHigh.toFixed(0)}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[24px] font-extrabold tabular-nums text-foreground leading-none">{formatCurrency(data.price)}</p>
+          <p className={`text-sm font-semibold mt-1 tabular-nums ${data.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {data.changePercent >= 0 ? "▲" : "▼"} {Math.abs(data.changePercent).toFixed(2)}%
+          </p>
+        </div>
+      </div>
+
+      {/* Status hero */}
+      <div className={`px-5 py-6 border-b border-border flex flex-col items-center text-center gap-2 ${st.heroBg}`}>
+        <span className="text-4xl leading-none">{st.emoji}</span>
+        <p className={`text-xl font-black uppercase tracking-wide ${st.heroText}`}>{st.label}</p>
+        <p className="text-sm text-foreground/70 max-w-sm leading-relaxed">{data.suggestedAction}</p>
+      </div>
+
+      {/* 52W range bar */}
+      <div className="px-5 py-4 border-b border-border">
+        <SLabel>52-Week Range Position — {data.rangePosition}% of yearly range</SLabel>
+        <div className="relative h-1.5 rounded-full bg-muted/40 mt-2 mb-3">
+          <div className="absolute inset-0 rounded-full" style={{ background: "linear-gradient(to right, #ef4444, #f59e0b, #22c55e)" }} />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-amber-400 z-10"
+            style={{ left: `${Math.min(Math.max(data.rangePosition, 2), 98)}%`, transform: "translate(-50%, -50%)" }}
+          />
+        </div>
+        <div className="flex justify-between text-[10px] text-muted-foreground tabular-nums">
+          <span>52W Low ₹{data.fiftyTwoWeekLow.toFixed(0)}</span>
+          <span className="text-amber-400 font-bold">▲ ₹{data.price.toFixed(2)}</span>
+          <span>52W High ₹{data.fiftyTwoWeekHigh.toFixed(0)}</span>
+        </div>
+      </div>
+
+      {/* Triggers */}
+      <div className="px-5 py-4 border-b border-border space-y-2">
+        <SLabel>Why this alert triggered</SLabel>
+        {data.triggers.map((t, i) => <TriggerRow key={i} trigger={t} />)}
+      </div>
+
+      {/* Gemini reasoning */}
+      <div className="px-5 py-4 border-b border-border">
+        <SLabel>Why the AI suggests this</SLabel>
+        <div className="space-y-3 mt-1">
+          {data.reasoning.map((r, i) => (
+            <div key={i} className="flex gap-3 items-start">
+              <span className="shrink-0 h-5 w-5 rounded-full border border-border bg-muted flex items-center justify-center text-[10px] font-bold text-primary mt-0.5">
+                {i + 1}
+              </span>
+              <p className="text-[13px] text-foreground/85 leading-relaxed">{r}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 4-state mini legend */}
+      <div className="flex items-center gap-2 px-5 py-3">
+        {(["LET_PROFITS_RUN", "WATCH", "ALERT", "EXIT"] as ProfitBookingStatus[]).map(s => {
+          const m = PB_STATUS[s];
+          const active = s === data.status;
+          return (
+            <div key={s} className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-center transition-colors ${active ? `${m.badgeBg} ${m.badgeBorder}` : "border-border"}`}>
+              <span className="text-base leading-none">{m.emoji}</span>
+              <span className={`text-[9px] font-bold uppercase leading-tight ${active ? m.badgeText : "text-muted-foreground"}`}>
+                {m.label.split(" ").slice(0, 2).join(" ")}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Profit Booking Accordion row ──────────────────────────────────────────────
+
+interface PBState {
+  status: "loading" | "done" | "error" | "skipped";
+  data?: ProfitBookingResult;
+  error?: string;
+}
+
+function PBAccordionRow({ holding, state }: { holding: Holding; state: PBState }) {
+  const [open, setOpen] = useState(false);
+  const st = state.data ? PB_STATUS[state.data.status] : null;
+
+  if (state.status === "skipped") {
+    return (
+      <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 opacity-50">
+        <div className="flex-1 min-w-0">
+          <p className="text-xl font-black uppercase tracking-tight text-foreground leading-none">{holding.symbol}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{holding.name}</p>
+        </div>
+        <span className="text-xs text-muted-foreground border border-border rounded px-2 py-1">Loss position — not applicable</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-xl border bg-card overflow-hidden transition-colors ${st ? st.badgeBorder : "border-border"}`}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-muted/20 transition-colors"
+      >
+        <span className="shrink-0 text-muted-foreground">
+          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xl font-black uppercase tracking-tight text-foreground leading-none">{holding.symbol}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{holding.name}</p>
+        </div>
+
+        {state.status === "loading" && (
+          <span className="shrink-0 text-[11px] text-muted-foreground animate-pulse px-3 py-1.5 rounded border border-border">Analysing…</span>
+        )}
+        {state.status === "error" && (
+          <span className="shrink-0 text-[11px] text-red-400 flex items-center gap-1">
+            <AlertCircle className="h-3.5 w-3.5" /> Error
+          </span>
+        )}
+        {state.status === "done" && state.data && st && (
+          <div className="flex items-center gap-3 shrink-0">
+            <span className={`text-sm font-black px-3 py-1.5 rounded border ${st.badgeBg} ${st.badgeText} ${st.badgeBorder}`}>
+              {st.emoji} {st.label}
+            </span>
+            <div className="text-right hidden sm:block">
+              <p className="text-sm font-bold tabular-nums text-foreground">{formatCurrency(state.data.price)}</p>
+              <p className={`text-[11px] font-semibold tabular-nums ${state.data.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {state.data.changePercent >= 0 ? "▲" : "▼"} {Math.abs(state.data.changePercent).toFixed(2)}%
+              </p>
+            </div>
+          </div>
+        )}
+      </button>
+
+      {open && state.status === "done" && state.data && (
+        <ProfitBookingCardBody
+          data={state.data}
+          holding={{ shares: holding.shares, avgCost: holding.avgCost, exchange: holding.exchange }}
+        />
+      )}
+      {open && state.status === "loading" && (
+        <div className="px-5 py-6 border-t border-border flex items-center gap-2 text-muted-foreground">
+          <BrainCircuit className="h-4 w-4 animate-pulse" />
+          <span className="text-sm">Analysing {holding.symbol} for profit booking signals…</span>
+        </div>
+      )}
+      {open && state.status === "error" && (
+        <div className="px-5 py-4 border-t border-border text-sm text-muted-foreground">{state.error}</div>
+      )}
+    </div>
+  );
+}
+
 // ── Accordion row ─────────────────────────────────────────────────────────────
 
 interface AnalysisState {
@@ -386,12 +622,21 @@ function AccordionRow({ holding, state }: { holding: Holding; state: AnalysisSta
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const PB_STATUS_ORDER: ProfitBookingStatus[] = ["EXIT", "ALERT", "WATCH", "LET_PROFITS_RUN"];
+
 export default function AIAnalysisPage() {
   const { activePortfolioId } = usePortfolio();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loadingHoldings, setLoadingHoldings] = useState(true);
+  const [activeTab, setActiveTab] = useState<"phase1" | "profit-booking">("phase1");
+
+  // Phase 1 state
   const [analysis, setAnalysis] = useState<Record<string, AnalysisState>>({});
   const fetchingRef = useRef(false);
+
+  // Profit Booking state
+  const [pbAnalysis, setPbAnalysis] = useState<Record<string, PBState>>({});
+  const pbFetchingRef = useRef(false);
 
   useEffect(() => {
     const pid = activePortfolioId === ALL_PORTFOLIOS_ID ? "__ALL__" : activePortfolioId;
@@ -408,6 +653,7 @@ export default function AIAnalysisPage() {
       .finally(() => setLoadingHoldings(false));
   }, [activePortfolioId]);
 
+  // Phase 1 runner
   const runAnalysis = useCallback(async (list: Holding[], force = false) => {
     if (fetchingRef.current && !force) return;
     fetchingRef.current = true;
@@ -433,11 +679,60 @@ export default function AIAnalysisPage() {
     fetchingRef.current = false;
   }, []);
 
+  // Profit Booking runner — only runs when tab is first opened
+  const runProfitBooking = useCallback(async (list: Holding[]) => {
+    if (pbFetchingRef.current) return;
+    pbFetchingRef.current = true;
+
+    // Mark all as loading or skipped (loss-making stocks have no avgCost / negative P&L can't be determined without price yet, so we'll check after fetch)
+    setPbAnalysis(Object.fromEntries(list.map(h => [h.symbol, { status: "loading" }])));
+
+    async function processPB(h: Holding) {
+      try {
+        const res  = await fetch(`/api/profit-booking/${h.symbol}?exchange=${h.exchange || "NSE"}`);
+        const data: ProfitBookingResult = await res.json();
+        if (!res.ok) throw new Error((data as { error?: string }).error ?? "Error");
+
+        // If holding is in a loss (currentPrice < avgCost), skip profit booking
+        if (h.avgCost && data.price < h.avgCost) {
+          setPbAnalysis(prev => ({ ...prev, [h.symbol]: { status: "skipped" } }));
+        } else {
+          setPbAnalysis(prev => ({ ...prev, [h.symbol]: { status: "done", data } }));
+        }
+      } catch (e) {
+        setPbAnalysis(prev => ({ ...prev, [h.symbol]: { status: "error", error: String(e) } }));
+      }
+    }
+
+    for (let i = 0; i < list.length; i += 3) {
+      await Promise.all(list.slice(i, i + 3).map(processPB));
+    }
+    pbFetchingRef.current = false;
+  }, []);
+
   useEffect(() => {
     if (holdings.length > 0) runAnalysis(holdings);
   }, [holdings, runAnalysis]);
 
+  // Lazy-load profit booking when tab is first opened
+  useEffect(() => {
+    if (activeTab === "profit-booking" && holdings.length > 0 && Object.keys(pbAnalysis).length === 0) {
+      runProfitBooking(holdings);
+    }
+  }, [activeTab, holdings, pbAnalysis, runProfitBooking]);
+
   const doneCount = Object.values(analysis).filter(a => a.status === "done").length;
+  const pbDoneCount = Object.values(pbAnalysis).filter(a => a.status === "done").length;
+
+  // Sort PB holdings by urgency
+  const sortedForPB = [...holdings].sort((a, b) => {
+    const sa = pbAnalysis[a.symbol];
+    const sb = pbAnalysis[b.symbol];
+    if (!sa || !sb) return 0;
+    const ia = sa.status === "done" ? PB_STATUS_ORDER.indexOf(sa.data!.status) : 99;
+    const ib = sb.status === "done" ? PB_STATUS_ORDER.indexOf(sb.data!.status) : 99;
+    return ia - ib;
+  });
 
   if (loadingHoldings) {
     return (
@@ -463,34 +758,74 @@ export default function AIAnalysisPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Page header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-        <div>
+      {/* Page header + tabs */}
+      <div className="border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-6 pt-4 pb-0">
           <h1 className="text-base font-bold text-foreground flex items-center gap-2">
             <BrainCircuit className="h-4 w-4 text-primary" />
-            Phase 1 Decision Engine
+            AI Analysis
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {doneCount}/{holdings.length} holdings analysed · click any stock to expand
-          </p>
+          <button
+            onClick={() => activeTab === "phase1" ? runAnalysis(holdings, true) : runProfitBooking(holdings)}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </button>
         </div>
-        <button
-          onClick={() => runAnalysis(holdings, true)}
-          disabled={fetchingRef.current}
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-40"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${fetchingRef.current ? "animate-spin" : ""}`} />
-          Refresh All
-        </button>
+
+        {/* Tab switcher */}
+        <div className="flex gap-1 px-6 pb-0 mt-3">
+          <button
+            onClick={() => setActiveTab("phase1")}
+            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold border-b-2 transition-colors ${
+              activeTab === "phase1"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <BrainCircuit className="h-3.5 w-3.5" />
+            Phase 1 Engine
+            <span className="text-[10px] opacity-60">{doneCount}/{holdings.length}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("profit-booking")}
+            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold border-b-2 transition-colors ${
+              activeTab === "profit-booking"
+                ? "border-orange-400 text-orange-400"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <BookIcon className="h-3.5 w-3.5" />
+            Profit Booking
+            {pbDoneCount > 0 && <span className="text-[10px] opacity-60">{pbDoneCount}/{holdings.length}</span>}
+          </button>
+        </div>
       </div>
 
-      {/* Accordion list */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
-        {holdings.map(holding => {
-          const state = analysis[holding.symbol] ?? { status: "loading" };
-          return <AccordionRow key={holding.symbol} holding={holding} state={state} />;
-        })}
-      </div>
+      {/* Phase 1 tab */}
+      {activeTab === "phase1" && (
+        <div className="flex-1 overflow-y-auto p-6 space-y-3">
+          <p className="text-xs text-muted-foreground">{doneCount}/{holdings.length} holdings analysed · click any stock to expand</p>
+          {holdings.map(holding => {
+            const state = analysis[holding.symbol] ?? { status: "loading" };
+            return <AccordionRow key={holding.symbol} holding={holding} state={state} />;
+          })}
+        </div>
+      )}
+
+      {/* Profit Booking tab */}
+      {activeTab === "profit-booking" && (
+        <div className="flex-1 overflow-y-auto p-6 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Sorted by urgency 🔴→🟠→🟡→🟢 · Loss positions excluded · click any stock to expand
+          </p>
+          {sortedForPB.map(holding => {
+            const state = pbAnalysis[holding.symbol] ?? { status: "loading" };
+            return <PBAccordionRow key={holding.symbol} holding={holding} state={state} />;
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { POPULAR_INDIAN_STOCKS } from "@/lib/india";
 import { StockChartModal } from "@/components/charts/stock-chart-modal";
-import { Phase1CardBody, DEC } from "@/app/ai-analysis/page";
-import type { Phase1AnalysisResult } from "@/types";
-import { Search, TrendingUp, TrendingDown, BrainCircuit, ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
+import { Phase1CardBody, DEC, ProfitBookingCardBody } from "@/app/ai-analysis/page";
+import type { Phase1AnalysisResult, ProfitBookingResult } from "@/types";
+import { Search, TrendingUp, TrendingDown, BrainCircuit, ChevronDown, ChevronUp, BarChart2, TrendingDown as BookIcon } from "lucide-react";
 
 interface SearchResult {
   symbol: string;
@@ -25,6 +25,12 @@ interface Phase1State {
   error?: string;
 }
 
+interface PBState {
+  status: "idle" | "loading" | "done" | "error";
+  data?: ProfitBookingResult;
+  error?: string;
+}
+
 // ── Single search result row ──────────────────────────────────────────────────
 
 function ResultRow({
@@ -34,8 +40,9 @@ function ResultRow({
   r: SearchResult;
   onChart: () => void;
 }) {
-  const [open, setOpen]         = useState(false);
-  const [p1, setP1]             = useState<Phase1State>({ status: "idle" });
+  const [activePanel, setActivePanel] = useState<"none" | "phase1" | "profit-booking">("none");
+  const [p1, setP1] = useState<Phase1State>({ status: "idle" });
+  const [pb, setPb] = useState<PBState>({ status: "idle" });
 
   const fetchP1 = useCallback(async () => {
     if (p1.status === "loading" || p1.status === "done") return;
@@ -43,39 +50,51 @@ function ResultRow({
     try {
       const res  = await fetch(`/api/analysis/${r.symbol}?exchange=${r.exchange}`);
       const data = await res.json();
-      if (data.phase1) {
-        setP1({ status: "done", data: data.phase1 });
-      } else {
-        setP1({ status: "error", error: data.error || "No Phase 1 data" });
-      }
+      if (data.phase1) setP1({ status: "done", data: data.phase1 });
+      else setP1({ status: "error", error: data.error || "No Phase 1 data" });
     } catch {
       setP1({ status: "error", error: "Network error" });
     }
   }, [p1.status, r.symbol, r.exchange]);
 
-  const handleToggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) fetchP1();
+  const fetchPB = useCallback(async () => {
+    if (pb.status === "loading" || pb.status === "done") return;
+    setPb({ status: "loading" });
+    try {
+      const res  = await fetch(`/api/profit-booking/${r.symbol}?exchange=${r.exchange}`);
+      const data: ProfitBookingResult = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? "Error");
+      setPb({ status: "done", data });
+    } catch (e) {
+      setPb({ status: "error", error: String(e) });
+    }
+  }, [pb.status, r.symbol, r.exchange]);
+
+  const togglePanel = (panel: "phase1" | "profit-booking") => {
+    if (activePanel === panel) {
+      setActivePanel("none");
+    } else {
+      setActivePanel(panel);
+      if (panel === "phase1") fetchP1();
+      if (panel === "profit-booking") fetchPB();
+    }
   };
 
   const d = p1.data ? (DEC[p1.data.decision] ?? DEC.HOLD) : null;
+  const open = activePanel !== "none";
 
   return (
-    <div className={`rounded-xl border bg-card overflow-hidden transition-colors ${d ? d.border : "border-border"}`}>
+    <div className={`rounded-xl border bg-card overflow-hidden transition-colors ${d && activePanel === "phase1" ? d.border : "border-border"}`}>
       {/* Summary row */}
       <div className="flex items-center gap-4 px-5 py-4">
-        {/* Stock name — BIG, CAPS, BOLD */}
-        <button onClick={handleToggle} className="flex-1 flex items-center gap-4 text-left min-w-0">
-          <span className="shrink-0 text-muted-foreground">
-            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-xl font-black uppercase tracking-tight text-foreground leading-none">{r.symbol}</p>
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>
-            {r.sector && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{r.sector}</p>}
-          </div>
-        </button>
+        <span className="shrink-0 text-muted-foreground">
+          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xl font-black uppercase tracking-tight text-foreground leading-none">{r.symbol}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>
+          {r.sector && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{r.sector}</p>}
+        </div>
 
         {/* Price */}
         <div className="text-right shrink-0">
@@ -94,22 +113,29 @@ function ResultRow({
           )}
         </div>
 
-        {/* Decision badge (once loaded) */}
-        {d && p1.data && (
-          <span className={`shrink-0 text-sm font-black px-3 py-1.5 rounded ${d.summaryBadge}`}>{d.label}</span>
-        )}
-        {p1.status === "loading" && (
-          <span className="shrink-0 text-[11px] text-muted-foreground animate-pulse px-3 py-1.5 rounded border border-border">Analysing…</span>
-        )}
-
         {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
           <button
-            onClick={handleToggle}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors font-semibold"
+            onClick={() => togglePanel("phase1")}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border font-semibold transition-colors ${
+              activePanel === "phase1"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-primary/40 text-primary hover:bg-primary/10"
+            }`}
           >
             <BrainCircuit className="h-3.5 w-3.5" />
-            {open ? "Collapse" : "Phase 1"}
+            Phase 1
+          </button>
+          <button
+            onClick={() => togglePanel("profit-booking")}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border font-semibold transition-colors ${
+              activePanel === "profit-booking"
+                ? "border-orange-400/60 bg-orange-400/10 text-orange-400"
+                : "border-orange-400/30 text-orange-400/80 hover:bg-orange-400/10"
+            }`}
+          >
+            <BookIcon className="h-3.5 w-3.5" />
+            Profit Book
           </button>
           <button
             onClick={onChart}
@@ -121,18 +147,32 @@ function ResultRow({
         </div>
       </div>
 
-      {/* Expanded Phase1CardBody */}
-      {open && p1.status === "done" && p1.data && (
+      {/* Phase 1 panel */}
+      {activePanel === "phase1" && p1.status === "done" && p1.data && (
         <Phase1CardBody data={p1.data} holding={{ exchange: r.exchange, sector: r.sector }} />
       )}
-      {open && p1.status === "loading" && (
+      {activePanel === "phase1" && p1.status === "loading" && (
         <div className="px-5 py-6 border-t border-border flex items-center gap-2 text-muted-foreground">
           <BrainCircuit className="h-4 w-4 animate-pulse" />
           <span className="text-sm">Running Phase 1 Analysis for {r.symbol}…</span>
         </div>
       )}
-      {open && p1.status === "error" && (
+      {activePanel === "phase1" && p1.status === "error" && (
         <div className="px-5 py-4 border-t border-border text-sm text-red-400">{p1.error}</div>
+      )}
+
+      {/* Profit Booking panel */}
+      {activePanel === "profit-booking" && pb.status === "done" && pb.data && (
+        <ProfitBookingCardBody data={pb.data} />
+      )}
+      {activePanel === "profit-booking" && pb.status === "loading" && (
+        <div className="px-5 py-6 border-t border-border flex items-center gap-2 text-muted-foreground">
+          <BookIcon className="h-4 w-4 animate-pulse" />
+          <span className="text-sm">Analysing profit booking signals for {r.symbol}…</span>
+        </div>
+      )}
+      {activePanel === "profit-booking" && pb.status === "error" && (
+        <div className="px-5 py-4 border-t border-border text-sm text-red-400">{pb.error}</div>
       )}
     </div>
   );
