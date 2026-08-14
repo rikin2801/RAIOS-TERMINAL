@@ -12,12 +12,14 @@ import {
   Target,
   ArrowLeftRight,
   Search,
+  BrainCircuit,
 } from "lucide-react";
 import { PortfolioSelector } from "./portfolio-selector";
 
 const primaryNav = [
   { href: "/dashboard",          label: "Dashboard",         icon: LayoutDashboard },
-  { href: "/portfolio-manager",  label: "AI Manager",        icon: Target,          accent: true },
+  { href: "/ai-analysis",        label: "AI Analysis",       icon: BrainCircuit,    accent: true },
+  { href: "/portfolio-manager",  label: "AI Manager",        icon: Target },
   { href: "/portfolio",          label: "Portfolio",         icon: Briefcase },
   { href: "/market",             label: "Market",            icon: TrendingUp },
   { href: "/search",             label: "Search",            icon: Search },

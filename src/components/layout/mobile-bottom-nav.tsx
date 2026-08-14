@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Briefcase, Target, TrendingUp, Brain } from "lucide-react";
+import { LayoutDashboard, Briefcase, Target, TrendingUp, BrainCircuit } from "lucide-react";
 
 const nav = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
-  { href: "/portfolio-manager", label: "AI Mgr", icon: Target, primary: true },
-  { href: "/market", label: "Market", icon: TrendingUp },
-  { href: "/ai", label: "AI Chat", icon: Brain },
+  { href: "/dashboard",    label: "Dashboard", icon: LayoutDashboard },
+  { href: "/portfolio",    label: "Portfolio", icon: Briefcase },
+  { href: "/ai-analysis",  label: "AI",        icon: BrainCircuit, primary: true },
+  { href: "/portfolio-manager", label: "Mgr",  icon: Target },
+  { href: "/market",       label: "Market",    icon: TrendingUp },
 ];
 
 export function MobileBottomNav() {
