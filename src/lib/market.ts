@@ -346,5 +346,34 @@ export async function getFundamentals(symbol: string, exchange: Exchange = "NSE"
     dividendYield: fd?.dividendYield,
     bookValue: ks?.bookValue,
     priceToBook: ks?.priceToBook,
+    // Analyst consensus
+    analystTarget: fd?.targetMeanPrice ?? undefined,
+    analystCount: fd?.numberOfAnalystOpinions ?? undefined,
+    analystConsensus: fd?.recommendationKey ?? undefined,
   };
+}
+
+export async function getHourlyCandles(symbol: string, exchange: Exchange = "NSE") {
+  const yahooSymbol = toYahooSymbol(symbol, exchange);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await yf.chart(yahooSymbol, {
+      period1: new Date(Date.now() - 90 * 24 * 3600_000),
+      period2: new Date(),
+      interval: "60m",
+    }, { validateResult: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return ((result?.quotes ?? []) as any[])
+      .filter((q: any) => q.open != null && q.close != null)
+      .map((q: any) => ({
+        time: Math.floor(new Date(q.date).getTime() / 1000),
+        open: q.open ?? 0,
+        high: q.high ?? 0,
+        low: q.low ?? 0,
+        close: q.close ?? 0,
+        volume: q.volume ?? 0,
+      }));
+  } catch {
+    return [];
+  }
 }

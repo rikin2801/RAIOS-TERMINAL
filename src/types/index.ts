@@ -142,6 +142,10 @@ export interface FundamentalData {
   fiiHolding?: number;
   diiHolding?: number;
   publicHolding?: number;
+  // Analyst consensus (from Yahoo Finance financialData)
+  analystTarget?: number;
+  analystCount?: number;
+  analystConsensus?: string; // "strong_buy" | "buy" | "hold" | "sell" | "strong_sell"
 }
 
 // ── Explainable AI types ───────────────────────────────────────────────────────
@@ -223,3 +227,64 @@ export interface ChatMessage {
 }
 
 export type AnalysisTimeframe = "DAILY" | "WEEKLY" | "MONTHLY";
+
+// ── Phase 1 Analysis (RAIOS Decision Engine v1) ───────────────────────────────
+
+export interface Phase1TrendResult {
+  trend: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
+  evidence: string;
+}
+
+export interface Phase1AnalysisResult {
+  // Gemini decision
+  decision: "BUY" | "WAIT" | "HOLD" | "BOOK_PROFITS" | "SELL";
+  whatChanged: string;
+  whyDecision: string[];
+  whatWouldChange: string[];
+  targets: {
+    oneMonth: { low: number; high: number };
+    threeMonths: { low: number; high: number };
+    sixMonths: { low: number; high: number };
+    oneYear: { low: number; high: number };
+  };
+
+  // Server-computed trend (HH/HL analysis)
+  trend: {
+    oneMonth: Phase1TrendResult;
+    threeMonths: Phase1TrendResult;
+    sixMonths: Phase1TrendResult;
+    oneYear: Phase1TrendResult;
+    primary: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
+  };
+
+  // Business health and price attractiveness
+  businessHealth: "STRONG" | "STABLE" | "WEAK";
+  businessSummary: string;
+  priceAttractiveness: "ATTRACTIVE" | "FAIRLY_VALUED" | "EXPENSIVE";
+  priceSummary: string;
+
+  // Entry zone (from price structure)
+  entryZone: { low: number; high: number };
+  confirmationLevel: number;
+  support: number;
+  resistance: number;
+
+  // Technical context (supporting evidence only — not decision drivers)
+  daily: { rsi: number; macdHist: number; macdBullish: boolean; stochK: number };
+  hourly: { rsi: number; macdHist: number; macdBullish: boolean; stochK: number } | null;
+
+  // Analyst data (from Yahoo Finance)
+  analystTarget: number | null;
+  analystCount: number | null;
+  analystConsensus: string | null;
+
+  // Stock info
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  fiftyTwoWeekHigh: number;
+  fiftyTwoWeekLow: number;
+  pe: number | null;
+}

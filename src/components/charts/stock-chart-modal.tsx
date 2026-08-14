@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, Newspaper, ExternalLink } from "lucide-react";
+import { X, Loader2, Newspaper, ExternalLink, BrainCircuit, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import type { Phase1AnalysisResult } from "@/types";
 import type { NewsItem } from "@/app/api/market/news/route";
 import {
   createChart,
@@ -239,6 +240,181 @@ function formatTime(unix: number, interval: ChartInterval): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+// ── Phase 1 Card ──────────────────────────────────────────────────────────────
+
+function Phase1Card({
+  data,
+  trendColor,
+  trendBg,
+  healthColor,
+  attractColor,
+  phase1DecisionColor,
+}: {
+  data: Phase1AnalysisResult;
+  trendColor: (t: string) => string;
+  trendBg: (t: string) => string;
+  healthColor: (h: string) => string;
+  attractColor: (a: string) => string;
+  phase1DecisionColor: Record<string, string>;
+}) {
+  const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const fmtRange = (r: { low: number; high: number }) => `${fmt(r.low)}–${fmt(r.high)}`;
+
+  const trendPeriods = [
+    { label: "1Y", val: data.trend.oneYear },
+    { label: "6M", val: data.trend.sixMonths },
+    { label: "3M", val: data.trend.threeMonths },
+    { label: "1M", val: data.trend.oneMonth },
+  ] as const;
+
+  const consensusLabel: Record<string, string> = {
+    strong_buy: "STRONG BUY", buy: "BUY", hold: "HOLD", sell: "SELL", strong_sell: "STRONG SELL",
+  };
+
+  const TrendIcon = ({ t }: { t: string }) =>
+    t === "UPTREND" ? <TrendingUp className="h-3 w-3" /> :
+    t === "DOWNTREND" ? <TrendingDown className="h-3 w-3" /> :
+    <Minus className="h-3 w-3" />;
+
+  return (
+    <div className="space-y-3 text-sm">
+
+      {/* ── Decision header ── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className={`text-sm font-bold px-3 py-1.5 rounded border ${phase1DecisionColor[data.decision] ?? ""}`}>
+          {data.decision.replace("_", " ")}
+        </span>
+        <span className="text-xs text-muted-foreground">{data.name} · {data.symbol}</span>
+        {data.pe && <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">P/E {data.pe.toFixed(1)}</span>}
+      </div>
+
+      {/* ── Trend structure ── */}
+      <div className="rounded-lg border border-border/50 p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Trend Structure (HH/HL)</p>
+        <div className="flex gap-1.5 flex-wrap">
+          {trendPeriods.map(({ label, val }) => (
+            <span key={label} className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${trendBg(val.trend)} ${trendColor(val.trend)}`}>
+              <TrendIcon t={val.trend} />
+              {label} {val.trend === "UPTREND" ? "↑" : val.trend === "DOWNTREND" ? "↓" : "→"}
+            </span>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground leading-relaxed">{data.trend.oneYear.evidence}</p>
+      </div>
+
+      {/* ── 3-pillar row: Business | Price | What Changed ── */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-border/50 p-2.5 space-y-1">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Business</p>
+          <p className={`text-xs font-bold ${healthColor(data.businessHealth)}`}>{data.businessHealth}</p>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{data.businessSummary}</p>
+        </div>
+        <div className="rounded-lg border border-border/50 p-2.5 space-y-1">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Price</p>
+          <p className={`text-xs font-bold ${attractColor(data.priceAttractiveness)}`}>
+            {data.priceAttractiveness.replace("_", " ")}
+          </p>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{data.priceSummary}</p>
+        </div>
+        <div className="rounded-lg border border-border/50 p-2.5 space-y-1">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What Changed</p>
+          <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-4">{data.whatChanged}</p>
+        </div>
+      </div>
+
+      {/* ── Entry zone + Analyst row ── */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-border/50 p-2.5 space-y-1">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Entry Zone</p>
+          <p className="text-xs font-mono font-semibold text-foreground">{fmtRange(data.entryZone)}</p>
+          <p className="text-[10px] text-muted-foreground">Confirmation above {fmt(data.confirmationLevel)}</p>
+          <div className="text-[10px] text-muted-foreground/70">
+            S: {fmt(data.support)} · R: {fmt(data.resistance)}
+          </div>
+        </div>
+        {data.analystTarget && (
+          <div className="rounded-lg border border-border/50 p-2.5 space-y-1">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Analyst Consensus</p>
+            {data.analystConsensus && (
+              <p className="text-xs font-bold text-green-400">{consensusLabel[data.analystConsensus] ?? data.analystConsensus.toUpperCase()}</p>
+            )}
+            <p className="text-xs font-mono text-foreground">Avg target {fmt(data.analystTarget)}</p>
+            {data.analystCount && <p className="text-[10px] text-muted-foreground">{data.analystCount} analysts</p>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Target ranges ── */}
+      <div className="rounded-lg border border-border/50 p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Price Targets</p>
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "1M", range: data.targets.oneMonth },
+            { label: "3M", range: data.targets.threeMonths },
+            { label: "6M", range: data.targets.sixMonths },
+            { label: "1Y", range: data.targets.oneYear },
+          ].map(({ label, range }) => (
+            <div key={label} className="text-center">
+              <p className="text-[10px] text-muted-foreground font-medium">{label}</p>
+              <p className="text-[10px] font-mono text-foreground mt-0.5">{fmt(range.low)}</p>
+              <p className="text-[10px] text-muted-foreground">–</p>
+              <p className="text-[10px] font-mono text-foreground">{fmt(range.high)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Why decision ── */}
+      <div className="rounded-lg border border-border/50 p-3 space-y-1.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Why {data.decision.replace("_", " ")}?</p>
+        <ol className="space-y-1">
+          {data.whyDecision.map((reason, i) => (
+            <li key={i} className="flex gap-2 text-[11px] text-foreground/90 leading-relaxed">
+              <span className="text-muted-foreground shrink-0 tabular-nums">{i + 1}.</span>
+              <span>{reason}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {/* ── What would change ── */}
+      <div className="rounded-lg border border-border/50 p-3 space-y-1.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What Would Change This?</p>
+        <ul className="space-y-1">
+          {data.whatWouldChange.map((cond, i) => (
+            <li key={i} className="flex gap-2 text-[11px] text-muted-foreground leading-relaxed">
+              <span className="text-yellow-500/70 shrink-0">•</span>
+              <span>{cond}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* ── Supporting technical context ── */}
+      <div className="rounded-lg border border-dashed border-border/40 p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Supporting Technical Context <span className="normal-case font-normal">(not decision drivers)</span>
+        </p>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+          <div className="col-span-2 text-[10px] text-muted-foreground/60 mb-0.5">Daily</div>
+          <span className="text-muted-foreground">RSI <span className={`font-mono font-semibold ${data.daily.rsi > 70 ? "text-red-400" : data.daily.rsi < 30 ? "text-green-400" : "text-foreground"}`}>{data.daily.rsi.toFixed(0)}</span></span>
+          <span className="text-muted-foreground">MACD <span className={`font-semibold ${data.daily.macdBullish ? "text-green-400" : "text-red-400"}`}>{data.daily.macdBullish ? "↑" : "↓"} {data.daily.macdHist.toFixed(2)}</span></span>
+          <span className="text-muted-foreground">Stoch <span className={`font-mono font-semibold ${data.daily.stochK > 80 ? "text-red-400" : data.daily.stochK < 20 ? "text-green-400" : "text-foreground"}`}>{data.daily.stochK.toFixed(0)}</span></span>
+          {data.hourly && (
+            <>
+              <div className="col-span-2 text-[10px] text-muted-foreground/60 mt-1 mb-0.5">Hourly</div>
+              <span className="text-muted-foreground">RSI <span className={`font-mono font-semibold ${data.hourly.rsi > 70 ? "text-red-400" : data.hourly.rsi < 30 ? "text-green-400" : "text-foreground"}`}>{data.hourly.rsi.toFixed(0)}</span></span>
+              <span className="text-muted-foreground">MACD <span className={`font-semibold ${data.hourly.macdBullish ? "text-green-400" : "text-red-400"}`}>{data.hourly.macdBullish ? "↑" : "↓"} {data.hourly.macdHist.toFixed(2)}</span></span>
+              <span className="text-muted-foreground">Stoch <span className={`font-mono font-semibold ${data.hourly.stochK > 80 ? "text-red-400" : data.hourly.stochK < 20 ? "text-green-400" : "text-foreground"}`}>{data.hourly.stochK.toFixed(0)}</span></span>
+            </>
+          )}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Props) {
@@ -255,6 +431,12 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
   const [dailyCandles, setDailyCandles] = useState<Candle[]>([]);
+
+  const [showAI, setShowAI] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<Phase1AnalysisResult | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiFetched = useRef(false);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -421,6 +603,28 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
     }
   };
 
+  const fetchAIAnalysis = useCallback(async () => {
+    if (aiFetched.current) return;
+    aiFetched.current = true;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/analysis/${symbol}?exchange=${exchange}`);
+      if (!res.ok) throw new Error("Analysis failed");
+      const data = await res.json();
+      if (data.phase1) setAiAnalysis(data.phase1 as Phase1AnalysisResult);
+      else throw new Error("No Phase 1 data");
+    } catch {
+      setAiError("Could not load AI analysis. Try again.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [symbol, exchange]);
+
+  useEffect(() => {
+    if (showAI && !aiFetched.current) fetchAIAnalysis();
+  }, [showAI, fetchAIAnalysis]);
+
   const indicatorData = candles.length > 0 ? buildIndicatorData(candles) : [];
   const signal = indicatorData.length > 0 ? computeSignal(indicatorData, quote) : null;
   const changeColor = (quote?.changePercent ?? 0) >= 0 ? "#22c55e" : "#ef4444";
@@ -432,6 +636,23 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
     "SELL":        "bg-red-700 text-red-100",
     "STRONG SELL": "bg-red-500 text-white",
   };
+
+  const phase1DecisionColor: Record<string, string> = {
+    BUY:          "bg-green-500/15 text-green-400 border-green-500/30",
+    WAIT:         "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+    HOLD:         "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
+    BOOK_PROFITS: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+    SELL:         "bg-red-500/15 text-red-400 border-red-500/30",
+  };
+
+  const trendColor = (t: string) =>
+    t === "UPTREND" ? "text-green-400" : t === "DOWNTREND" ? "text-red-400" : "text-yellow-400";
+  const trendBg = (t: string) =>
+    t === "UPTREND" ? "bg-green-500/10 border-green-500/20" : t === "DOWNTREND" ? "bg-red-500/10 border-red-500/20" : "bg-yellow-500/10 border-yellow-500/20";
+  const healthColor = (h: string) =>
+    h === "STRONG" ? "text-green-400" : h === "WEAK" ? "text-red-400" : "text-blue-400";
+  const attractColor = (a: string) =>
+    a === "ATTRACTIVE" ? "text-green-400" : a === "EXPENSIVE" ? "text-red-400" : "text-yellow-400";
 
   const tooltipStyle = {
     backgroundColor: "hsl(var(--card))",
@@ -529,44 +750,46 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
           </div>
         </div>
 
-        {/* ── Decision Signal Banner ── */}
-        {signal && !loading && (
+        {/* ── Signal / AI Banner ── */}
+        {!loading && (signal || aiAnalysis) && (
           <div className="flex items-center gap-3 px-4 py-2 border-b border-border shrink-0 bg-card/50 flex-wrap">
-            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${verdictColor[signal.verdict]}`}>
-              {signal.verdict}
-            </span>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-              {signal.rsi !== null && (
-                <span className={signal.rsi < 35 ? "text-green-400" : signal.rsi > 65 ? "text-red-400" : ""}>
-                  RSI {signal.rsi.toFixed(0)}{signal.rsi < 35 ? " ↓ Oversold" : signal.rsi > 65 ? " ↑ Overbought" : ""}
-                </span>
-              )}
-              {signal.macdBull !== null && (
-                <span className={signal.macdBull ? "text-green-400" : "text-red-400"}>
-                  MACD {signal.macdBull ? "↑ Bullish" : "↓ Bearish"}
-                </span>
-              )}
-              {signal.stochK !== null && (
-                <span className={signal.stochK < 25 ? "text-green-400" : signal.stochK > 75 ? "text-red-400" : ""}>
-                  Stoch {signal.stochK.toFixed(0)}{signal.stochK < 25 ? " ↓ Oversold" : signal.stochK > 75 ? " ↑ Overbought" : ""}
-                </span>
-              )}
-              {signal.range52pct !== null && quote?.fiftyTwoWeekLow && quote?.fiftyTwoWeekHigh && (
-                <span className="flex items-center gap-1.5 text-muted-foreground">
-                  52W
-                  <span className="relative inline-block w-20 h-1.5 bg-muted rounded-full overflow-hidden">
-                    <span
-                      className="absolute left-0 top-0 h-full bg-primary rounded-full"
-                      style={{ width: `${signal.range52pct}%` }}
-                    />
+            {/* Phase 1 badge when AI loaded */}
+            {aiAnalysis ? (
+              <span className={`text-xs font-bold px-2.5 py-1 rounded border ${phase1DecisionColor[aiAnalysis.decision] ?? ""}`}>
+                {aiAnalysis.decision.replace("_", " ")}
+              </span>
+            ) : null}
+            {/* Technical context numbers — always shown as plain values */}
+            {signal && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                {signal.rsi !== null && <span>RSI {signal.rsi.toFixed(0)}</span>}
+                {signal.macdBull !== null && (
+                  <span className={signal.macdBull ? "text-green-400/70" : "text-red-400/70"}>
+                    MACD {signal.macdBull ? "↑" : "↓"}
                   </span>
-                  <span className="tabular-nums">{signal.range52pct.toFixed(0)}%</span>
-                  <span className="text-[10px]">
-                    (₹{quote.fiftyTwoWeekLow.toFixed(0)}–₹{quote.fiftyTwoWeekHigh.toFixed(0)})
+                )}
+                {signal.stochK !== null && <span>Stoch {signal.stochK.toFixed(0)}</span>}
+                {signal.range52pct !== null && quote?.fiftyTwoWeekLow && quote?.fiftyTwoWeekHigh && (
+                  <span className="flex items-center gap-1.5">
+                    52W
+                    <span className="relative inline-block w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <span className="absolute left-0 top-0 h-full bg-primary rounded-full" style={{ width: `${signal.range52pct}%` }} />
+                    </span>
+                    <span className="tabular-nums">{signal.range52pct.toFixed(0)}%</span>
+                    <span className="text-[10px]">(₹{quote.fiftyTwoWeekLow.toFixed(0)}–₹{quote.fiftyTwoWeekHigh.toFixed(0)})</span>
                   </span>
-                </span>
-              )}
-            </div>
+                )}
+              </div>
+            )}
+            {!aiAnalysis && (
+              <button
+                onClick={() => { setShowAI(true); setShowRSI(false); setShowMACD(false); setShowStoch(false); setShowNews(false); }}
+                className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+              >
+                <BrainCircuit className="h-3 w-3" />
+                AI Analysis
+              </button>
+            )}
           </div>
         )}
 
@@ -600,9 +823,9 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0 flex-wrap">
               <span className="text-xs text-muted-foreground">Indicators</span>
               {[
-                { label: "RSI (14)", active: showRSI && !showNews, toggle: () => { setShowNews(false); setShowRSI((v) => !v); } },
-                { label: "MACD",     active: showMACD && !showNews, toggle: () => { setShowNews(false); setShowMACD((v) => !v); } },
-                { label: "Stoch",    active: showStoch && !showNews, toggle: () => { setShowNews(false); setShowStoch((v) => !v); } },
+                { label: "RSI (14)", active: showRSI && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowRSI((v) => !v); } },
+                { label: "MACD",     active: showMACD && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowMACD((v) => !v); } },
+                { label: "Stoch",    active: showStoch && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowStoch((v) => !v); } },
               ].map((ind) => (
                 <button
                   key={ind.label}
@@ -633,11 +856,50 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                   </span>
                 )}
               </button>
-              {!showNews && <span className="ml-auto text-[10px] text-muted-foreground">Scroll ↓ for all</span>}
+              <div className="w-px h-4 bg-border mx-1" />
+              <button
+                onClick={() => {
+                  const next = !showAI;
+                  setShowAI(next);
+                  if (next) { setShowNews(false); setShowRSI(false); setShowMACD(false); setShowStoch(false); }
+                }}
+                className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded border transition-colors ${
+                  showAI
+                    ? "border-violet-500 text-violet-400 bg-violet-500/10"
+                    : "border-border text-muted-foreground hover:border-muted-foreground"
+                }`}
+              >
+                <BrainCircuit className="h-3 w-3" />
+                AI Analysis
+                {aiAnalysis && <span className="ml-0.5 text-[10px]">✓</span>}
+              </button>
+              {!showNews && !showAI && <span className="ml-auto text-[10px] text-muted-foreground">Scroll ↓ for all</span>}
             </div>
 
             {/* Scrollable indicator charts / news */}
             <div className="flex-1 overflow-y-auto min-h-0">
+              {/* ── AI Analysis Panel ── */}
+              {showAI && (
+                <div className="px-4 py-3">
+                  {aiLoading && (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+                      <div className="text-center">
+                        <p className="text-sm font-medium">Running Phase 1 Analysis</p>
+                        <p className="text-xs mt-0.5">Trend · Business · Price · News</p>
+                      </div>
+                    </div>
+                  )}
+                  {aiError && !aiLoading && (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
+                      <p className="text-sm">{aiError}</p>
+                      <button onClick={() => { aiFetched.current = false; fetchAIAnalysis(); }} className="text-xs text-primary hover:underline">Retry</button>
+                    </div>
+                  )}
+                  {aiAnalysis && !aiLoading && <Phase1Card data={aiAnalysis} trendColor={trendColor} trendBg={trendBg} healthColor={healthColor} attractColor={attractColor} phase1DecisionColor={phase1DecisionColor} />}
+                </div>
+              )}
+
               {/* ── News Panel ── */}
               {showNews && (
                 <div className="px-4 py-3 space-y-2">
@@ -681,7 +943,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
               )}
 
               {/* ── Indicator Charts ── */}
-              {!showNews && indicatorData.length > 0 && (showRSI || showMACD || showStoch) ? (
+              {!showNews && !showAI && indicatorData.length > 0 && (showRSI || showMACD || showStoch) ? (
                 <>
                   {showRSI && (
                     <div className="px-2 pt-3 pb-1">
@@ -763,7 +1025,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                     </div>
                   )}
                 </>
-              ) : !showNews && !loading && indicatorData.length === 0 ? (
+              ) : !showNews && !showAI && !loading && indicatorData.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                   Not enough data for indicators
                 </div>

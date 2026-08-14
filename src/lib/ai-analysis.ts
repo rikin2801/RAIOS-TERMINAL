@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AIAnalysisResult, TechnicalIndicators, FundamentalData, MarketQuote } from "@/types";
 import type { NewsItem } from "@/lib/news";
 import { formatNewsForPrompt } from "@/lib/news";
+import type { MultiTimeframeTrend } from "@/lib/trend-engine";
 
 const IndicatorDetailSchema = z.object({
   value: z.string(),
@@ -327,4 +328,187 @@ function getMockAnalysis(
       } : undefined,
     } : {},
   };
+}
+
+// ── Phase 1 Decision Engine ───────────────────────────────────────────────────
+
+const Phase1GeminiSchema = z.object({
+  decision: z.enum(["BUY", "WAIT", "HOLD", "BOOK_PROFITS", "SELL"]),
+  whatChanged: z.string(),
+  whyDecision: z.array(z.string()).max(5),
+  whatWouldChange: z.array(z.string()).max(3),
+  targets: z.object({
+    oneMonth: z.object({ low: z.number(), high: z.number() }),
+    threeMonths: z.object({ low: z.number(), high: z.number() }),
+    sixMonths: z.object({ low: z.number(), high: z.number() }),
+    oneYear: z.object({ low: z.number(), high: z.number() }),
+  }),
+});
+
+export type Phase1GeminiOutput = z.infer<typeof Phase1GeminiSchema>;
+
+function buildPhase1Prompt(params: {
+  quote: MarketQuote;
+  trend: MultiTimeframeTrend;
+  businessHealth: "STRONG" | "STABLE" | "WEAK";
+  businessSummary: string;
+  priceAttractiveness: "ATTRACTIVE" | "FAIRLY_VALUED" | "EXPENSIVE";
+  priceSummary: string;
+  analystTarget: number | null;
+  analystCount: number | null;
+  analystConsensus: string | null;
+  news: NewsItem[];
+}): string {
+  const {
+    quote, trend, businessHealth, businessSummary,
+    priceAttractiveness, priceSummary,
+    analystTarget, analystCount, analystConsensus, news,
+  } = params;
+
+  const fmt = (n: number) => `₹${n.toFixed(0)}`;
+  const trendLabel = (t: { trend: string; evidence: string }) =>
+    `${t.trend} — ${t.evidence}`;
+
+  const analystSection = analystTarget
+    ? `Analyst consensus: ${analystCount ?? "?"} analysts, avg target ${fmt(analystTarget)}` +
+      (analystConsensus ? `, recommendation: ${analystConsensus.replace("_", " ").toUpperCase()}` : "")
+    : "Analyst data: unavailable";
+
+  const newsSection = news.length > 0
+    ? `Recent news (${news.length} headlines):\n` +
+      news.slice(0, 8).map((n, i) => `${i + 1}. "${n.title}" [${n.source}]`).join("\n")
+    : "Recent news: No headlines available";
+
+  return `You are RAIOS, an expert Indian stock market analyst using the RAIOS Phase 1 Decision Framework.
+
+STOCK: ${quote.symbol} (${quote.name})
+EXCHANGE: NSE/BSE · PRICE: ${fmt(quote.price)} (${quote.changePercent >= 0 ? "+" : ""}${quote.changePercent.toFixed(2)}% today)
+52-WEEK RANGE: ${fmt(quote.fiftyTwoWeekLow)} – ${fmt(quote.fiftyTwoWeekHigh)}
+
+═══ Q1. TREND (HH/HL Analysis) ═══
+· 1Y: ${trendLabel(trend.oneYear)}
+· 6M: ${trendLabel(trend.sixMonths)}
+· 3M: ${trendLabel(trend.threeMonths)}
+· 1M: ${trendLabel(trend.oneMonth)}
+· Primary trend: ${trend.primary}
+
+═══ Q2. BUSINESS HEALTH ═══
+Status: ${businessHealth}
+${businessSummary}
+
+═══ Q3. PRICE ATTRACTIVENESS ═══
+Status: ${priceAttractiveness}
+${priceSummary}
+${analystSection}
+
+═══ Q4. WHAT HAS CHANGED? ═══
+${newsSection}
+
+═══ YOUR TASK ═══
+Using ONLY the 4-question framework above, provide:
+
+1. DECISION: BUY / WAIT / HOLD / BOOK_PROFITS / SELL
+   · BUY = trend intact, business healthy, price attractive — enter now
+   · WAIT = setup forming but entry not ideal — be specific what to wait for
+   · HOLD = already invested — maintain, no new buying needed
+   · BOOK_PROFITS = price has run significantly — take partial or full profits
+   · SELL = fundamental deterioration or trend broken — exit position
+
+2. WHAT CHANGED (1-2 sentences): What is the single most important development since 3 months ago?
+
+3. WHY THIS DECISION (max 5 bullet points): Cite trend structure, business momentum, valuation, and news catalysts.
+   DO NOT cite RSI, MACD, or Stochastic as reasons — those are supporting context only.
+
+4. WHAT WOULD CHANGE THIS (max 3 conditions): Specific price levels or business events that would flip the recommendation.
+
+5. PRICE TARGET RANGES (not point estimates — always a range):
+   · 1 Month, 3 Months, 6 Months, 1 Year
+   · Base on: trend extension, analyst consensus target, business trajectory
+   · DO NOT use fixed % formulas. Use actual price levels.
+   · All prices in ₹ (no decimals needed)
+
+RULES:
+- No avgCost, no stopLoss — those are not part of Phase 1
+- No single-number targets — always a low/high range
+- All prices in ₹`;
+}
+
+function getPhase1Fallback(params: {
+  price: number;
+  trend: MultiTimeframeTrend;
+  businessHealth: "STRONG" | "STABLE" | "WEAK";
+  priceAttractiveness: "ATTRACTIVE" | "FAIRLY_VALUED" | "EXPENSIVE";
+  analystTarget: number | null;
+}): Phase1GeminiOutput {
+  const { price, trend, businessHealth, priceAttractiveness, analystTarget } = params;
+
+  let decision: Phase1GeminiOutput["decision"];
+  if (trend.primary === "UPTREND" && businessHealth !== "WEAK" && priceAttractiveness !== "EXPENSIVE") {
+    decision = "BUY";
+  } else if (trend.primary === "UPTREND" && priceAttractiveness === "EXPENSIVE") {
+    decision = "WAIT";
+  } else if (trend.primary === "DOWNTREND" && businessHealth === "WEAK") {
+    decision = "SELL";
+  } else if (trend.primary === "DOWNTREND") {
+    decision = "WAIT";
+  } else {
+    decision = "HOLD";
+  }
+
+  const base = analystTarget ?? price * 1.10;
+  const r = (n: number) => Math.round(n);
+  return {
+    decision,
+    whatChanged: "Analysis computed from price structure (AI unavailable)",
+    whyDecision: [
+      `${trend.primary} — primary trend based on HH/HL analysis across 1Y/3M timeframes`,
+      `Business health: ${businessHealth}`,
+      `Price attractiveness: ${priceAttractiveness}`,
+    ],
+    whatWouldChange: [
+      `Primary trend structure breaks — ${trend.primary === "UPTREND" ? "lower low below recent support" : "recovery above recent resistance"}`,
+      `Material change in business fundamentals`,
+    ],
+    targets: {
+      oneMonth: { low: r(price * 0.97), high: r(Math.min(base, price * 1.05)) },
+      threeMonths: { low: r(price * 0.95), high: r(Math.min(base, price * 1.12)) },
+      sixMonths: { low: r(price * 0.92), high: r(Math.min(base, price * 1.20)) },
+      oneYear: { low: r(price * 0.88), high: r(base * 1.05) },
+    },
+  };
+}
+
+export async function runPhase1Analysis(params: {
+  quote: MarketQuote;
+  trend: MultiTimeframeTrend;
+  businessHealth: "STRONG" | "STABLE" | "WEAK";
+  businessSummary: string;
+  priceAttractiveness: "ATTRACTIVE" | "FAIRLY_VALUED" | "EXPENSIVE";
+  priceSummary: string;
+  analystTarget: number | null;
+  analystCount: number | null;
+  analystConsensus: string | null;
+  news: NewsItem[];
+}): Promise<Phase1GeminiOutput> {
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!apiKey || apiKey === "your-gemini-api-key-here") {
+    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
+  }
+
+  const google = createGoogleGenerativeAI({ apiKey });
+  const prompt = buildPhase1Prompt(params);
+
+  try {
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: Phase1GeminiSchema,
+      prompt,
+    });
+    return object;
+  } catch (err: unknown) {
+    const msg = String((err as { message?: string })?.message ?? "");
+    const isQuota = msg.includes("quota") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
+    console.warn(`[phase1] Gemini error${isQuota ? " (quota)" : ""}, using fallback`);
+    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
+  }
 }
