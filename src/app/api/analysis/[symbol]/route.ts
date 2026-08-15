@@ -59,29 +59,34 @@ export async function GET(
         let rawMetrics: Record<string, unknown> = {};
         try { rawMetrics = JSON.parse(cached.rawMetrics); } catch { /**/ }
 
-        // Phase 1 cached result
+        // Phase 1 cached result — skip if it predates weekly/macdDir fields
         if (rawMetrics.version === "phase1") {
           const p1 = rawMetrics.result as Record<string, unknown>;
-          return NextResponse.json({
-            signal: cached.signal,
-            confidence: cached.confidence,
-            investmentScore: cached.investmentScore,
-            risks: JSON.parse(cached.risks),
-            bullishFactors: JSON.parse(cached.bullishFactors),
-            bearishFactors: JSON.parse(cached.bearishFactors),
-            entryZone: cached.entryZone,
-            stopLoss: cached.stopLoss,
-            targetPrice: cached.targetPrice,
-            summary: cached.summary,
-            indicators: rawMetrics.indicators,
-            fundamentals: null,
-            quote: rawMetrics.quote
-              ? { symbol: cached.symbol, name: cached.symbol, ...(rawMetrics.quote as object) }
-              : undefined,
-            timeframe,
-            cached: true,
-            phase1: p1,
-          });
+          const daily = p1.daily as Record<string, unknown> | undefined;
+          const isUpToDate = p1.weekly !== undefined && daily?.macdDir !== undefined;
+          if (isUpToDate) {
+            return NextResponse.json({
+              signal: cached.signal,
+              confidence: cached.confidence,
+              investmentScore: cached.investmentScore,
+              risks: JSON.parse(cached.risks),
+              bullishFactors: JSON.parse(cached.bullishFactors),
+              bearishFactors: JSON.parse(cached.bearishFactors),
+              entryZone: cached.entryZone,
+              stopLoss: cached.stopLoss,
+              targetPrice: cached.targetPrice,
+              summary: cached.summary,
+              indicators: rawMetrics.indicators,
+              fundamentals: null,
+              quote: rawMetrics.quote
+                ? { symbol: cached.symbol, name: cached.symbol, ...(rawMetrics.quote as object) }
+                : undefined,
+              timeframe,
+              cached: true,
+              phase1: p1,
+            });
+          }
+          // Stale cache — fall through to re-compute with new fields
         }
 
         // Legacy cached result

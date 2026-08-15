@@ -75,7 +75,7 @@ const INTERVALS: { label: string; value: ChartInterval; validPeriods: ChartPerio
   { label: "30m", value: "30m", validPeriods: ["1D", "5D", "1W", "1M", "3M"] },
   { label: "1h",  value: "1h",  validPeriods: ["1D", "5D", "1W", "1M", "3M", "1Y"] },
   { label: "1D",  value: "1d",  validPeriods: ["5D", "1W", "1M", "3M", "1Y", "5Y"] },
-  { label: "1W",  value: "1wk", validPeriods: ["1Y", "5Y"] },
+  { label: "1W",  value: "1wk", validPeriods: ["1M", "3M", "1Y", "5Y"] },
 ];
 
 const DEFAULT_INTERVAL: Record<ChartPeriod, ChartInterval> = {
