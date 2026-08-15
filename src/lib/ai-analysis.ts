@@ -358,11 +358,14 @@ function buildPhase1Prompt(params: {
   analystCount: number | null;
   analystConsensus: string | null;
   news: NewsItem[];
+  dailyRSI?: number;
+  dailyStochK?: number;
 }): string {
   const {
     quote, trend, businessHealth, businessSummary,
     priceAttractiveness, priceSummary,
     analystTarget, analystCount, analystConsensus, news,
+    dailyRSI, dailyStochK,
   } = params;
 
   const fmt = (n: number) => `₹${n.toFixed(0)}`;
@@ -404,8 +407,12 @@ ${analystSection}
 ═══ Q4. WHAT HAS CHANGED? ═══
 ${newsSection}
 
+═══ Q5. TECHNICAL MOMENTUM (context only — not a primary decision driver) ═══
+· Daily RSI (14): ${dailyRSI !== undefined ? dailyRSI.toFixed(1) : "N/A"}${dailyRSI !== undefined && dailyRSI > 70 ? " — OVERBOUGHT" : dailyRSI !== undefined && dailyRSI < 30 ? " — OVERSOLD" : ""}
+· Daily Stochastic %K: ${dailyStochK !== undefined ? dailyStochK.toFixed(1) : "N/A"}${dailyStochK !== undefined && dailyStochK > 80 ? " — OVERBOUGHT" : dailyStochK !== undefined && dailyStochK < 20 ? " — OVERSOLD" : ""}
+
 ═══ YOUR TASK ═══
-Using ONLY the 4-question framework above, provide:
+Using the 4-question framework above, provide:
 
 1. DECISION: BUY / WAIT / HOLD / BOOK_PROFITS / SELL
    · BUY = trend intact, business healthy, price attractive — enter now
@@ -413,6 +420,11 @@ Using ONLY the 4-question framework above, provide:
    · HOLD = already invested — maintain, no new buying needed
    · BOOK_PROFITS = price has run significantly — take partial or full profits
    · SELL = fundamental deterioration or trend broken — exit position
+
+   OVERRIDE RULE — if Daily RSI > 70 AND Daily Stochastic > 80 simultaneously:
+   · Do NOT choose BUY — the stock is in an overbought short-term state
+   · Use WAIT (if not yet invested) or HOLD (if already invested) instead
+   · You may still note that the long-term thesis is intact, but immediate buying is not recommended
 
 2. WHAT CHANGED (1-2 sentences): What is the single most important development since 3 months ago?
 
@@ -439,13 +451,16 @@ function getPhase1Fallback(params: {
   businessHealth: "STRONG" | "STABLE" | "WEAK";
   priceAttractiveness: "ATTRACTIVE" | "FAIRLY_VALUED" | "EXPENSIVE";
   analystTarget: number | null;
+  dailyRSI?: number;
+  dailyStochK?: number;
 }): Phase1GeminiOutput {
-  const { price, trend, businessHealth, priceAttractiveness, analystTarget } = params;
+  const { price, trend, businessHealth, priceAttractiveness, analystTarget, dailyRSI, dailyStochK } = params;
+  const isOverbought = (dailyRSI ?? 0) > 70 && (dailyStochK ?? 0) > 80;
 
   let decision: Phase1GeminiOutput["decision"];
-  if (trend.primary === "UPTREND" && businessHealth !== "WEAK" && priceAttractiveness !== "EXPENSIVE") {
+  if (trend.primary === "UPTREND" && businessHealth !== "WEAK" && priceAttractiveness !== "EXPENSIVE" && !isOverbought) {
     decision = "BUY";
-  } else if (trend.primary === "UPTREND" && priceAttractiveness === "EXPENSIVE") {
+  } else if (trend.primary === "UPTREND" && (priceAttractiveness === "EXPENSIVE" || isOverbought)) {
     decision = "WAIT";
   } else if (trend.primary === "DOWNTREND" && businessHealth === "WEAK") {
     decision = "SELL";
@@ -489,10 +504,12 @@ export async function runPhase1Analysis(params: {
   analystCount: number | null;
   analystConsensus: string | null;
   news: NewsItem[];
+  dailyRSI?: number;
+  dailyStochK?: number;
 }): Promise<Phase1GeminiOutput> {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey || apiKey === "your-gemini-api-key-here") {
-    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
+    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget, dailyRSI: params.dailyRSI, dailyStochK: params.dailyStochK });
   }
 
   const google = createGoogleGenerativeAI({ apiKey });
@@ -504,12 +521,23 @@ export async function runPhase1Analysis(params: {
       schema: Phase1GeminiSchema,
       prompt,
     });
+    // Safety net: if RSI and Stoch are both overbought, downgrade BUY → WAIT
+    if (object.decision === "BUY" && (params.dailyRSI ?? 0) > 70 && (params.dailyStochK ?? 0) > 80) {
+      return {
+        ...object,
+        decision: "WAIT",
+        whyDecision: [
+          ...object.whyDecision,
+          `Daily RSI at ${params.dailyRSI?.toFixed(1)} and Stochastic at ${params.dailyStochK?.toFixed(1)} are both overbought — wait for indicators to cool before entering`,
+        ],
+      };
+    }
     return object;
   } catch (err: unknown) {
     const msg = String((err as { message?: string })?.message ?? "");
     const isQuota = msg.includes("quota") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
     console.warn(`[phase1] Gemini error${isQuota ? " (quota)" : ""}, using fallback`);
-    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
+    return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget, dailyRSI: params.dailyRSI, dailyStochK: params.dailyStochK });
   }
 }
 

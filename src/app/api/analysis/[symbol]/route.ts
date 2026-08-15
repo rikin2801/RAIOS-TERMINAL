@@ -195,6 +195,8 @@ export async function GET(
       analystCount: fundamentals?.analystCount ?? null,
       analystConsensus: fundamentals?.analystConsensus ?? null,
       news,
+      dailyRSI: dailyIndicators.rsi,
+      dailyStochK: dailyIndicators.stochastic,
     });
 
     // ── Build full Phase 1 result ─────────────────────────────────────────────
