@@ -196,9 +196,15 @@ export function computeEntryZone(
   price: number,
   support: number,
 ): { low: number; high: number; confirmationLevel: number } {
-  // Entry zone: between recent support and just below current price
-  const entryLow = Math.max(support, Math.round(price * 0.96 * 10) / 10);
-  const entryHigh = Math.round(price * 0.995 * 10) / 10;
+  // Entry zone anchored to actual support level, not to current price.
+  // "Preferred entry zone" = where you would want to buy on a pullback.
+  // - High: up to 4% above support (where momentum buyers step in near support)
+  // - Low: at the support level itself
+  // - Capped so the zone never overlaps the current price (min 3% below)
+  const supportBasedHigh = support * 1.04;
+  const maxAllowed = price * 0.97;           // zone must be at least 3% below price
+  const entryHigh = Math.round(Math.min(supportBasedHigh, maxAllowed) * 10) / 10;
+  const entryLow  = Math.round(support * 10) / 10;
   const confirmationLevel = Math.round(price * 1.02 * 10) / 10;
 
   return { low: entryLow, high: entryHigh, confirmationLevel };
