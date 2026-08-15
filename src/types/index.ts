@@ -270,8 +270,9 @@ export interface Phase1AnalysisResult {
   resistance: number;
 
   // Technical context (supporting evidence only — not decision drivers)
-  daily: { rsi: number; macdHist: number; macdBullish: boolean; stochK: number };
-  hourly: { rsi: number; macdHist: number; macdBullish: boolean; stochK: number } | null;
+  daily: { rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number };
+  weekly: { rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number } | null;
+  hourly: { rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number } | null;
 
   // Analyst data (from Yahoo Finance)
   analystTarget: number | null;

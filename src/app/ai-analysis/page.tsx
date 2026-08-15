@@ -43,10 +43,11 @@ function stochCls(v: number){ return v < 25 ? "text-green-400" : v > 80 ? "text-
 function macdCls(bull: boolean) { return bull ? "text-green-400" : "text-red-400"; }
 function rsiCtx(v: number)  { return v < 35 ? "Oversold — potential bounce zone" : v > 70 ? "Overbought — watch for reversal" : "Healthy — room to extend"; }
 function stochCtx(v: number){ return v < 25 ? "Oversold — watch for bounce" : v > 80 ? "Overbought — watch for pullback" : "Mid-range — no extreme signal"; }
-function macdCtx(bull: boolean, hist: number) {
-  if (bull && hist > 0)  return "Positive & rising — momentum building";
-  if (!bull && hist < 0) return "Negative — distribution pressure";
-  return "Near zero — momentum neutral";
+function macdCtx(bull: boolean, dir: "RISING" | "FALLING") {
+  if (bull  && dir === "RISING")  return "↑ Positive · ↑ Rising — momentum building";
+  if (bull  && dir === "FALLING") return "↑ Positive · ↓ Slowing — watch for reversal";
+  if (!bull && dir === "FALLING") return "↓ Negative · ↓ Falling — downward pressure";
+  return "↓ Negative · ↑ Recovering — potential floor forming";
 }
 function analystCls(c: string) {
   if (c.includes("buy"))  return "text-green-400 bg-green-400/10";
@@ -86,8 +87,8 @@ function TargetBar({ label, low, high, price, rangeMin, rangeMax }: {
 }
 
 // ── Indicator block ───────────────────────────────────────────────────────────
-function IndBlock({ label, rsi, macdHist, macdBullish, stochK }: {
-  label: string; rsi: number; macdHist: number; macdBullish: boolean; stochK: number;
+function IndBlock({ label, rsi, macdHist, macdBullish, macdDir, stochK }: {
+  label: string; rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number;
 }) {
   return (
     <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
@@ -99,9 +100,9 @@ function IndBlock({ label, rsi, macdHist, macdBullish, stochK }: {
           <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{rsiCtx(rsi)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-foreground/70 mb-1">MACD Hist</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-foreground/70 mb-1">MACD Momentum</p>
           <p className={`text-[13px] font-bold tabular-nums ${macdCls(macdBullish)}`}>{macdHist >= 0 ? "+" : ""}{macdHist.toFixed(3)}</p>
-          <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{macdCtx(macdBullish, macdHist)}</p>
+          <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{macdCtx(macdBullish, macdDir)}</p>
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-foreground/70 mb-1">Stoch K</p>
@@ -266,9 +267,12 @@ export function Phase1CardBody({
       {/* Technical indicators */}
       <div className="px-5 py-4 border-b border-border space-y-3">
         <SLabel>Supporting Technical Context — Not Decision Drivers</SLabel>
-        <IndBlock label="Daily Timeframe" rsi={data.daily.rsi} macdHist={data.daily.macdHist} macdBullish={data.daily.macdBullish} stochK={data.daily.stochK} />
+        {data.weekly && (
+          <IndBlock label="Weekly Timeframe" rsi={data.weekly.rsi} macdHist={data.weekly.macdHist} macdBullish={data.weekly.macdBullish} macdDir={data.weekly.macdDir} stochK={data.weekly.stochK} />
+        )}
+        <IndBlock label="Daily Timeframe" rsi={data.daily.rsi} macdHist={data.daily.macdHist} macdBullish={data.daily.macdBullish} macdDir={data.daily.macdDir} stochK={data.daily.stochK} />
         {data.hourly && (
-          <IndBlock label="Hourly Timeframe" rsi={data.hourly.rsi} macdHist={data.hourly.macdHist} macdBullish={data.hourly.macdBullish} stochK={data.hourly.stochK} />
+          <IndBlock label="Hourly Timeframe" rsi={data.hourly.rsi} macdHist={data.hourly.macdHist} macdBullish={data.hourly.macdBullish} macdDir={data.hourly.macdDir} stochK={data.hourly.stochK} />
         )}
         <p className="text-[9px] text-muted-foreground leading-relaxed border-t border-border/40 pt-2">
           ⚠ RSI, MACD and Stochastic are supporting context only. The {d.label} decision is driven by trend structure (HH/HL), business fundamentals, and price attractiveness — not indicator levels.

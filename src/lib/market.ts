@@ -140,7 +140,7 @@ function getStartDate(period: string): Date {
 }
 
 export type ChartPeriod = "1D" | "5D" | "1W" | "1M" | "3M" | "1Y" | "5Y";
-export type ChartInterval = "1m" | "30m" | "1h" | "1d";
+export type ChartInterval = "1m" | "30m" | "1h" | "1d" | "1wk";
 
 // For intraday intervals with short periods, extend lookback so RSI/MACD/Stoch have
 // enough bars to compute (RSI needs 15+, MACD needs 35+, Stoch needs 16+).

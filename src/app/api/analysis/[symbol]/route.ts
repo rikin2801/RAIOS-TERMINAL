@@ -109,11 +109,12 @@ export async function GET(
 
   try {
     // ── Fetch all data in parallel ────────────────────────────────────────────
-    const [quote, historical, fundamentals, hourlyCandles, news] = await Promise.all([
+    const [quote, historical, fundamentals, hourlyCandles, weeklyCandles, news] = await Promise.all([
       getQuote(symbol, exchange),
       getHistoricalData(symbol, "1y", exchange, timeframe),
       getFundamentals(symbol, exchange),
       timeframe === "DAILY" ? getHourlyCandles(symbol, exchange) : Promise.resolve([]),
+      timeframe === "DAILY" ? getHistoricalData(symbol, "2y", exchange, "WEEKLY") : Promise.resolve([]),
       getStockNews(symbol, "").catch(() => [] as Awaited<ReturnType<typeof getStockNews>>),
     ]);
 
@@ -123,20 +124,44 @@ export async function GET(
 
     // ── Daily indicators ─────────────────────────────────────────────────────
     const dailyIndicators = calculateAllIndicators(historical);
+    const dClosesPrev = historical.slice(0, -1).map((c) => c.close);
+    const { histogram: dMACDPrev } = calculateMACD(dClosesPrev);
+    const dMACDDir: "RISING" | "FALLING" = dailyIndicators.macdHistogram >= dMACDPrev ? "RISING" : "FALLING";
+
+    // ── Weekly indicators ─────────────────────────────────────────────────────
+    let weeklyResult: { rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number } | null = null;
+    if (weeklyCandles.length >= 35) {
+      const wCloses = weeklyCandles.map((c) => c.close);
+      const wHighs  = weeklyCandles.map((c) => c.high);
+      const wLows   = weeklyCandles.map((c) => c.low);
+      const wRSI = calculateRSI(wCloses);
+      const { histogram: wMACDHist } = calculateMACD(wCloses);
+      const { histogram: wMACDPrev } = calculateMACD(wCloses.slice(0, -1));
+      const { k: wStochK } = calculateStochastic(wHighs, wLows, wCloses);
+      weeklyResult = {
+        rsi: Math.round(wRSI * 10) / 10,
+        macdHist: Math.round(wMACDHist * 1000) / 1000,
+        macdBullish: wMACDHist > 0,
+        macdDir: wMACDHist >= wMACDPrev ? "RISING" : "FALLING",
+        stochK: Math.round(wStochK * 10) / 10,
+      };
+    }
 
     // ── Hourly indicators ─────────────────────────────────────────────────────
-    let hourlyResult: { rsi: number; macdHist: number; macdBullish: boolean; stochK: number } | null = null;
+    let hourlyResult: { rsi: number; macdHist: number; macdBullish: boolean; macdDir: "RISING" | "FALLING"; stochK: number } | null = null;
     if (hourlyCandles.length >= 50) {
       const hCloses = hourlyCandles.map((c) => c.close);
       const hHighs = hourlyCandles.map((c) => c.high);
       const hLows = hourlyCandles.map((c) => c.low);
       const hRSI = calculateRSI(hCloses);
       const { histogram: hMACDHist } = calculateMACD(hCloses);
+      const { histogram: hMACDPrev } = calculateMACD(hCloses.slice(0, -1));
       const { k: hStochK } = calculateStochastic(hHighs, hLows, hCloses);
       hourlyResult = {
         rsi: Math.round(hRSI * 10) / 10,
         macdHist: Math.round(hMACDHist * 1000) / 1000,
         macdBullish: hMACDHist > 0,
+        macdDir: hMACDHist >= hMACDPrev ? "RISING" : "FALLING",
         stochK: Math.round(hStochK * 10) / 10,
       };
     }
@@ -193,8 +218,10 @@ export async function GET(
         rsi: Math.round(dailyIndicators.rsi * 10) / 10,
         macdHist: Math.round(dailyIndicators.macdHistogram * 1000) / 1000,
         macdBullish: dailyIndicators.macdHistogram > 0,
+        macdDir: dMACDDir,
         stochK: Math.round(dailyIndicators.stochastic * 10) / 10,
       },
+      weekly: weeklyResult,
       hourly: hourlyResult,
       analystTarget: fundamentals?.analystTarget ?? null,
       analystCount: fundamentals?.analystCount ?? null,

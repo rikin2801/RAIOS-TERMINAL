@@ -29,7 +29,7 @@ import {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type ChartPeriod = "1D" | "5D" | "1W" | "1M" | "3M" | "1Y" | "5Y";
-export type ChartInterval = "1m" | "30m" | "1h" | "1d";
+export type ChartInterval = "1m" | "30m" | "1h" | "1d" | "1wk";
 
 interface Candle {
   time: number;
@@ -75,11 +75,12 @@ const INTERVALS: { label: string; value: ChartInterval; validPeriods: ChartPerio
   { label: "30m", value: "30m", validPeriods: ["1D", "5D", "1W", "1M", "3M"] },
   { label: "1h",  value: "1h",  validPeriods: ["1D", "5D", "1W", "1M", "3M", "1Y"] },
   { label: "1D",  value: "1d",  validPeriods: ["5D", "1W", "1M", "3M", "1Y", "5Y"] },
+  { label: "1W",  value: "1wk", validPeriods: ["1Y", "5Y"] },
 ];
 
 const DEFAULT_INTERVAL: Record<ChartPeriod, ChartInterval> = {
   "1D": "30m", "5D": "30m", "1W": "1h",
-  "1M": "1d", "3M": "1d", "1Y": "1d", "5Y": "1d",
+  "1M": "1d", "3M": "1d", "1Y": "1d", "5Y": "1wk",
 };
 
 // ── Indicator Calculations ────────────────────────────────────────────────────
@@ -172,6 +173,20 @@ function buildIndicatorData(candles: Candle[]): IndicatorRow[] {
   });
 }
 
+// ── Bollinger Bands ───────────────────────────────────────────────────────────
+
+function calcBollingerBands(candles: Candle[], period = 20): { time: number; upper: number; middle: number; lower: number }[] {
+  const result: { time: number; upper: number; middle: number; lower: number }[] = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const slice = candles.slice(i - period + 1, i + 1);
+    const mean = slice.reduce((a, c) => a + c.close, 0) / period;
+    const variance = slice.reduce((a, c) => a + (c.close - mean) ** 2, 0) / period;
+    const std = Math.sqrt(variance);
+    result.push({ time: candles[i].time, upper: mean + 2 * std, middle: mean, lower: mean - 2 * std });
+  }
+  return result;
+}
+
 // ── Technical Signal Computation ──────────────────────────────────────────────
 
 type SignalVerdict = "STRONG BUY" | "BUY" | "HOLD" | "SELL" | "STRONG SELL";
@@ -182,6 +197,7 @@ function computeSignal(indData: IndicatorRow[], quote: QuoteInfo | null): {
   stochK: number | null;
   macdHist: number | null;
   macdBull: boolean | null;
+  macdDir: "RISING" | "FALLING" | null;
   range52pct: number | null;
 } | null {
   if (indData.length === 0) return null;
@@ -210,8 +226,11 @@ function computeSignal(indData: IndicatorRow[], quote: QuoteInfo | null): {
   }
 
   const prevHist = prev?.macdHist ?? null;
-  // Bonus: MACD crossover is stronger signal
+  // MACD direction: is histogram growing or shrinking?
+  let macdDir: "RISING" | "FALLING" | null = null;
   if (hist !== null && prevHist !== null) {
+    macdDir = hist >= prevHist ? "RISING" : "FALLING";
+    // Bonus: MACD crossover is stronger signal
     if (hist > 0 && prevHist <= 0) buy++;
     else if (hist < 0 && prevHist >= 0) sell++;
   }
@@ -229,7 +248,7 @@ function computeSignal(indData: IndicatorRow[], quote: QuoteInfo | null): {
     if (range > 0) range52pct = Math.max(0, Math.min(100, ((quote.price - quote.fiftyTwoWeekLow) / range) * 100));
   }
 
-  return { verdict, rsi, stochK, macdHist: hist, macdBull, range52pct };
+  return { verdict, rsi, stochK, macdHist: hist, macdBull, macdDir, range52pct };
 }
 
 function formatTime(unix: number, interval: ChartInterval): string {
@@ -237,6 +256,7 @@ function formatTime(unix: number, interval: ChartInterval): string {
   if (interval === "1m" || interval === "30m" || interval === "1h") {
     return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
+  if (interval === "1wk") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
@@ -395,20 +415,28 @@ function Phase1Card({
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
           Supporting Technical Context <span className="normal-case font-normal">(not decision drivers)</span>
         </p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-          <div className="col-span-2 text-[10px] text-muted-foreground/60 mb-0.5">Daily</div>
-          <span className="text-muted-foreground">RSI <span className={`font-mono font-semibold ${data.daily.rsi > 70 ? "text-red-400" : data.daily.rsi < 30 ? "text-green-400" : "text-foreground"}`}>{data.daily.rsi.toFixed(0)}</span></span>
-          <span className="text-muted-foreground">MACD <span className={`font-semibold ${data.daily.macdBullish ? "text-green-400" : "text-red-400"}`}>{data.daily.macdBullish ? "↑" : "↓"} {data.daily.macdHist.toFixed(2)}</span></span>
-          <span className="text-muted-foreground">Stoch <span className={`font-mono font-semibold ${data.daily.stochK > 80 ? "text-red-400" : data.daily.stochK < 20 ? "text-green-400" : "text-foreground"}`}>{data.daily.stochK.toFixed(0)}</span></span>
-          {data.hourly && (
-            <>
-              <div className="col-span-2 text-[10px] text-muted-foreground/60 mt-1 mb-0.5">Hourly</div>
-              <span className="text-muted-foreground">RSI <span className={`font-mono font-semibold ${data.hourly.rsi > 70 ? "text-red-400" : data.hourly.rsi < 30 ? "text-green-400" : "text-foreground"}`}>{data.hourly.rsi.toFixed(0)}</span></span>
-              <span className="text-muted-foreground">MACD <span className={`font-semibold ${data.hourly.macdBullish ? "text-green-400" : "text-red-400"}`}>{data.hourly.macdBullish ? "↑" : "↓"} {data.hourly.macdHist.toFixed(2)}</span></span>
-              <span className="text-muted-foreground">Stoch <span className={`font-mono font-semibold ${data.hourly.stochK > 80 ? "text-red-400" : data.hourly.stochK < 20 ? "text-green-400" : "text-foreground"}`}>{data.hourly.stochK.toFixed(0)}</span></span>
-            </>
-          )}
-        </div>
+        {(["weekly", "daily", "hourly"] as const).map((tf) => {
+          const d = tf === "weekly" ? data.weekly : tf === "daily" ? data.daily : data.hourly;
+          if (!d) return null;
+          const label = tf === "weekly" ? "Weekly" : tf === "daily" ? "Daily" : "Hourly";
+          return (
+            <div key={tf} className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+              <div className="col-span-2 text-[10px] text-muted-foreground/60 mb-0.5">{label}</div>
+              <span className="text-muted-foreground">RSI <span className={`font-mono font-semibold ${d.rsi > 70 ? "text-red-400" : d.rsi < 30 ? "text-green-400" : "text-foreground"}`}>{d.rsi.toFixed(0)}</span></span>
+              <span className="text-muted-foreground">
+                MACD{" "}
+                <span className={`font-semibold ${d.macdBullish ? "text-green-400" : "text-red-400"}`}>
+                  {d.macdBullish ? "↑" : "↓"} {d.macdHist.toFixed(2)}
+                </span>
+                {" "}
+                <span className={`text-[10px] ${d.macdDir === "RISING" ? "text-green-400/70" : "text-orange-400/70"}`}>
+                  {d.macdDir === "RISING" ? "▲Rising" : "▼Falling"}
+                </span>
+              </span>
+              <span className="text-muted-foreground">Stoch <span className={`font-mono font-semibold ${d.stochK > 80 ? "text-red-400" : d.stochK < 20 ? "text-green-400" : "text-foreground"}`}>{d.stochK.toFixed(0)}</span></span>
+            </div>
+          );
+        })}
       </div>
 
     </div>
@@ -427,6 +455,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
   const [showRSI, setShowRSI] = useState(true);
   const [showMACD, setShowMACD] = useState(true);
   const [showStoch, setShowStoch] = useState(true);
+  const [showBB, setShowBB] = useState(false);
   const [showNews, setShowNews] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
@@ -579,6 +608,20 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
       }
     }
 
+    // ── Bollinger Bands (on main price chart) ─────────────────────────────────
+    if (showBB && candles.length >= 20) {
+      const bbData = calcBollingerBands(candles);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bbUpper = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      bbUpper.setData(bbData.map((b) => ({ time: b.time as any, value: b.upper })));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bbMiddle = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.4)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+      bbMiddle.setData(bbData.map((b) => ({ time: b.time as any, value: b.middle })));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bbLower = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      bbLower.setData(bbData.map((b) => ({ time: b.time as any, value: b.lower })));
+    }
+
     chart.timeScale().fitContent();
 
     const ro = new ResizeObserver(() => {
@@ -593,7 +636,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, dailyCandles, interval]);
+  }, [candles, dailyCandles, interval, showBB]);
 
   const handlePeriodChange = (p: ChartPeriod) => {
     setPeriod(p);
@@ -625,7 +668,17 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
     if (showAI && !aiFetched.current) fetchAIAnalysis();
   }, [showAI, fetchAIAnalysis]);
 
-  const indicatorData = candles.length > 0 ? buildIndicatorData(candles) : [];
+  // For daily interval use 1Y daily candles as indicator source so MACD always
+  // has enough bars (1M only gives ~22 daily bars, too few for MACD's 35-bar need).
+  const indicatorSource =
+    interval === "1d" && dailyCandles.length >= 35 ? dailyCandles : candles;
+  const rawIndicatorData = indicatorSource.length > 0 ? buildIndicatorData(indicatorSource) : [];
+  // Trim to the visible period range when using extended source
+  const firstCandleTime = candles[0]?.time ?? 0;
+  const indicatorData =
+    indicatorSource === dailyCandles && firstCandleTime > 0
+      ? rawIndicatorData.filter((d) => d.time >= firstCandleTime)
+      : rawIndicatorData;
   const signal = indicatorData.length > 0 ? computeSignal(indicatorData, quote) : null;
   const changeColor = (quote?.changePercent ?? 0) >= 0 ? "#22c55e" : "#ef4444";
 
@@ -747,6 +800,7 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
           <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 rounded bg-sky-400" /> 50 DMA</span>
             <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 rounded bg-orange-500" /> 200 DMA</span>
+            {showBB && <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 rounded bg-purple-500" /> BB (20)</span>}
           </div>
         </div>
 
@@ -765,7 +819,12 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                 {signal.rsi !== null && <span>RSI {signal.rsi.toFixed(0)}</span>}
                 {signal.macdBull !== null && (
                   <span className={signal.macdBull ? "text-green-400/70" : "text-red-400/70"}>
-                    MACD {signal.macdBull ? "↑" : "↓"}
+                    MACD {signal.macdBull ? "↑+" : "↓−"}
+                    {signal.macdDir && (
+                      <span className={signal.macdDir === "RISING" ? "text-green-400/60" : "text-orange-400/60"}>
+                        {" "}{signal.macdDir === "RISING" ? "▲Upward" : "▼Downward"}
+                      </span>
+                    )}
                   </span>
                 )}
                 {signal.stochK !== null && <span>Stoch {signal.stochK.toFixed(0)}</span>}
@@ -823,9 +882,10 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0 flex-wrap">
               <span className="text-xs text-muted-foreground">Indicators</span>
               {[
-                { label: "RSI (14)", active: showRSI && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowRSI((v) => !v); } },
-                { label: "MACD",     active: showMACD && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowMACD((v) => !v); } },
+                { label: "RSI (14)", active: showRSI && !showNews && !showAI,  toggle: () => { setShowNews(false); setShowAI(false); setShowRSI((v) => !v); } },
+                { label: "MACD",     active: showMACD && !showNews && !showAI,  toggle: () => { setShowNews(false); setShowAI(false); setShowMACD((v) => !v); } },
                 { label: "Stoch",    active: showStoch && !showNews && !showAI, toggle: () => { setShowNews(false); setShowAI(false); setShowStoch((v) => !v); } },
+                { label: "BB (20)",  active: showBB,                            toggle: () => setShowBB((v) => !v) },
               ].map((ind) => (
                 <button
                   key={ind.label}
@@ -975,7 +1035,12 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
                         MACD (12,26,9)
                         {signal?.macdBull !== null && (
                           <span className={`text-xs font-bold ${signal?.macdBull ? "text-green-400" : "text-red-400"}`}>
-                            {signal?.macdBull ? "↑ Bullish" : "↓ Bearish"}
+                            {signal?.macdBull ? "↑ Positive" : "↓ Negative"}
+                          </span>
+                        )}
+                        {signal?.macdDir && (
+                          <span className={`text-xs font-semibold ${signal.macdDir === "RISING" ? "text-green-400/70" : "text-orange-400/70"}`}>
+                            {signal.macdDir === "RISING" ? "▲ Momentum Upward" : "▼ Momentum Downward"}
                           </span>
                         )}
                       </div>
