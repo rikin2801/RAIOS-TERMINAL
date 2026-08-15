@@ -609,17 +609,26 @@ export function StockChartModal({ symbol, exchange = "NSE", name, onClose }: Pro
     }
 
     // ── Bollinger Bands (on main price chart) ─────────────────────────────────
-    if (showBB && candles.length >= 20) {
-      const bbData = calcBollingerBands(candles);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bbUpper = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      bbUpper.setData(bbData.map((b) => ({ time: b.time as any, value: b.upper })));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bbMiddle = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.4)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
-      bbMiddle.setData(bbData.map((b) => ({ time: b.time as any, value: b.middle })));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bbLower = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      bbLower.setData(bbData.map((b) => ({ time: b.time as any, value: b.lower })));
+    // For daily interval use 1Y daily candles so BB always has enough warmup bars
+    // (1M daily only has ~22 candles — BB needs 20 leaving just 2-3 visible points)
+    if (showBB) {
+      const bbSource = interval === "1d" && dailyCandles.length >= 20 ? dailyCandles : candles;
+      if (bbSource.length >= 20) {
+        const firstTime = candles[0]?.time ?? 0;
+        const bbData = calcBollingerBands(bbSource)
+          .filter((b) => b.time >= firstTime);
+        if (bbData.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const bbUpper = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+          bbUpper.setData(bbData.map((b) => ({ time: b.time as any, value: b.upper })));
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const bbMiddle = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.4)", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+          bbMiddle.setData(bbData.map((b) => ({ time: b.time as any, value: b.middle })));
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const bbLower = chart.addSeries(LineSeries, { color: "rgba(147,51,234,0.7)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+          bbLower.setData(bbData.map((b) => ({ time: b.time as any, value: b.lower })));
+        }
+      }
     }
 
     chart.timeScale().fitContent();
