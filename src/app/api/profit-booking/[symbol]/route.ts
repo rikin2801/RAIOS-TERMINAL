@@ -13,11 +13,11 @@ function determineStatus(
   sma50: number,
 ): ProfitBookingStatus {
   // EXIT: price below SMA50 while overbought, or at peak of yearly range
-  if ((!( price > sma50) && rsi > 68) || rangePosition > 92) return "EXIT";
-  // ALERT: RSI extended + stoch overbought, OR RSI very high, OR near 52W high
-  if ((rsi > 70 && stoch > 78) || rsi > 75 || rangePosition > 80) return "ALERT";
-  // WATCH: RSI elevated or stoch elevated
-  if (rsi > 65 || stoch > 70) return "WATCH";
+  if ((!(price > sma50) && rsi > 68) || rangePosition > 92) return "EXIT";
+  // ALERT: momentum AND position both extended — needs both signals to avoid false alarms
+  if ((rsi > 70 && stoch > 78) || rsi > 75 || (rangePosition > 85 && rsi > 60)) return "ALERT";
+  // WATCH: elevated momentum OR high range position (single signal — softer warning)
+  if (rsi > 65 || stoch > 70 || rangePosition > 80) return "WATCH";
   return "LET_PROFITS_RUN";
 }
 

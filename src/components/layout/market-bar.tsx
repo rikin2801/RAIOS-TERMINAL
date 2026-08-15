@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { IndexQuote } from "@/app/api/market/indices/route";
+import { AlertBell } from "./alert-bell";
 
 function isMarketOpen(): boolean {
   const now = new Date();
@@ -61,37 +62,41 @@ export function MarketBar() {
   }, [fetchIndices]);
 
   return (
-    <div className="h-12 flex items-center gap-0 border-b border-border bg-card/50 backdrop-blur-sm px-4 overflow-x-auto shrink-0">
-      {/* Market status */}
-      <div className="flex items-center gap-2 pr-5 border-r border-border mr-6 shrink-0">
-        <span className={`h-2 w-2 rounded-full ${open ? "bg-green-400 animate-pulse" : "bg-muted-foreground"}`} />
-        <span className={`text-sm font-bold tracking-widest ${open ? "text-green-400" : "text-muted-foreground"}`}>
-          {open ? "MARKET OPEN" : "MARKET CLOSED"}
-        </span>
+    <div className="h-12 flex items-center border-b border-border bg-card/50 backdrop-blur-sm shrink-0">
+      {/* Scrollable left section: market status + indices */}
+      <div className="flex items-center gap-0 overflow-x-auto flex-1 px-4">
+        {/* Market status */}
+        <div className="flex items-center gap-2 pr-5 border-r border-border mr-6 shrink-0">
+          <span className={`h-2 w-2 rounded-full ${open ? "bg-green-400 animate-pulse" : "bg-muted-foreground"}`} />
+          <span className={`text-sm font-bold tracking-widest ${open ? "text-green-400" : "text-muted-foreground"}`}>
+            {open ? "MARKET OPEN" : "MARKET CLOSED"}
+          </span>
+        </div>
+
+        {/* Indices */}
+        <div className="flex items-center gap-7 flex-1">
+          {indices.map((idx) => {
+            const up = idx.changePercent >= 0;
+            return (
+              <div key={idx.symbol} className="flex items-center gap-2.5 shrink-0">
+                <span className="text-sm font-semibold text-muted-foreground tracking-wide">{idx.name}</span>
+                <span className="text-base font-mono font-bold">{formatINR(idx.price)}</span>
+                <span className={`text-sm font-mono font-semibold ${up ? "text-green-400" : "text-red-400"}`}>
+                  {up ? "▲" : "▼"} {Math.abs(idx.changePercent).toFixed(2)}%
+                </span>
+              </div>
+            );
+          })}
+          {indices.length === 0 && (
+            <span className="text-sm text-muted-foreground animate-pulse">Loading market data…</span>
+          )}
+        </div>
       </div>
 
-      {/* Indices */}
-      <div className="flex items-center gap-7 overflow-x-auto flex-1">
-        {indices.map((idx) => {
-          const up = idx.changePercent >= 0;
-          return (
-            <div key={idx.symbol} className="flex items-center gap-2.5 shrink-0">
-              <span className="text-sm font-semibold text-muted-foreground tracking-wide">{idx.name}</span>
-              <span className="text-base font-mono font-bold">{formatINR(idx.price)}</span>
-              <span className={`text-sm font-mono font-semibold ${up ? "text-green-400" : "text-red-400"}`}>
-                {up ? "▲" : "▼"} {Math.abs(idx.changePercent).toFixed(2)}%
-              </span>
-            </div>
-          );
-        })}
-        {indices.length === 0 && (
-          <span className="text-sm text-muted-foreground animate-pulse">Loading market data…</span>
-        )}
-      </div>
-
-      {/* Clock */}
-      <div className="pl-5 border-l border-border ml-4 shrink-0 text-muted-foreground">
+      {/* Clock + Alerts — outside overflow so the dropdown isn't clipped */}
+      <div className="flex items-center gap-3 pl-5 pr-4 border-l border-border shrink-0 text-muted-foreground">
         <ISTClock />
+        <AlertBell />
       </div>
     </div>
   );

@@ -7,76 +7,68 @@ datasource db {
   provider = "sqlite"
 }
 
-// ── Portfolio Profile ─────────────────────────────────────────────────────────
-// One record per investment account (ICICI Direct, Zerodha, NJ Trading, etc.)
 model Portfolio {
-  id          String   @id @default(cuid())
-  name        String
-  familyGroup String?
-  broker      String?
-  description String?
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  holdings      Holding[]
-  transactions  Transaction[]
-  watchlists    Watchlist[]
+  id            String              @id @default(cuid())
+  name          String
+  familyGroup   String?
+  broker        String?
+  description   String?
+  isDefault     Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
   analyses      AIAnalysis[]
+  holdings      Holding[]
   importHistory ImportHistory[]
   snapshots     PortfolioSnapshot[]
+  transactions  Transaction[]
+  watchlists    Watchlist[]
 }
 
-// ── Holding ───────────────────────────────────────────────────────────────────
 model Holding {
-  id           String     @id @default(cuid())
+  id           String        @id @default(cuid())
   portfolioId  String?
-  portfolio    Portfolio? @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   symbol       String
   name         String
   shares       Float
   avgCost      Float
   sector       String?
   notes        String?
-  exchange     String     @default("NSE")
+  exchange     String        @default("NSE")
   purchaseDate String?
   broker       String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  portfolio    Portfolio?    @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   transactions Transaction[]
 }
 
-// ── Transaction ───────────────────────────────────────────────────────────────
-// Full transaction history per portfolio
 model Transaction {
   id          String    @id @default(cuid())
   portfolioId String
-  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   holdingId   String?
-  holding     Holding?  @relation(fields: [holdingId], references: [id])
   symbol      String
   name        String
-  type        String    // BUY | SELL | DIVIDEND | BONUS | SPLIT | RIGHTS
+  type        String
   shares      Float
   price       Float
-  amount      Float     // shares * price (pre-brokerage)
+  amount      Float
   brokerage   Float?
-  date        String    // YYYY-MM-DD
+  date        String
   exchange    String    @default("NSE")
   notes       String?
-  importId    String?   // links to ImportHistory.id
+  importId    String?
   createdAt   DateTime  @default(now())
+  holding     Holding?  @relation(fields: [holdingId], references: [id])
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 
-// ── Watchlist ─────────────────────────────────────────────────────────────────
 model Watchlist {
   id          String          @id @default(cuid())
   portfolioId String?
-  portfolio   Portfolio?      @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   name        String
-  items       WatchlistItem[]
   createdAt   DateTime        @default(now())
+  portfolio   Portfolio?      @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  items       WatchlistItem[]
 }
 
 model WatchlistItem {
@@ -84,65 +76,60 @@ model WatchlistItem {
   symbol      String
   name        String
   watchlistId String
-  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
   addedAt     DateTime  @default(now())
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
 
   @@unique([symbol, watchlistId])
 }
 
-// ── AI Analysis ───────────────────────────────────────────────────────────────
 model AIAnalysis {
   id              String     @id @default(cuid())
   portfolioId     String?
-  portfolio       Portfolio? @relation(fields: [portfolioId], references: [id])
   symbol          String
   timeframe       String     @default("DAILY")
   signal          String
   confidence      Float
   investmentScore Float
-  risks           String     // JSON array
-  bullishFactors  String     // JSON array
-  bearishFactors  String     // JSON array
+  risks           String
+  bullishFactors  String
+  bearishFactors  String
   entryZone       String
   stopLoss        Float
   targetPrice     Float
   summary         String
-  rawMetrics      String     // JSON with indicators + quote + fundamentals
-  reasoning       String?    // JSON with full explainable AI chain
+  rawMetrics      String
+  reasoning       String?
   createdAt       DateTime   @default(now())
+  portfolio       Portfolio? @relation(fields: [portfolioId], references: [id])
 }
 
-// ── Import History ────────────────────────────────────────────────────────────
 model ImportHistory {
   id          String    @id @default(cuid())
   portfolioId String
-  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  broker      String    // ICICI_DIRECT | NJ_TRADING | ZERODHA | RAIOS_CSV | MANUAL
-  fileType    String    // portfolio_summary | transaction_statement | holdings
+  broker      String
+  fileType    String
   fileName    String
   rowCount    Int
-  status      String    @default("SUCCESS") // SUCCESS | PARTIAL | FAILED
+  status      String    @default("SUCCESS")
   notes       String?
   importedAt  DateTime  @default(now())
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 
-// ── Portfolio Snapshot ────────────────────────────────────────────────────────
-// Daily health snapshots for historical portfolio performance tracking
 model PortfolioSnapshot {
   id          String    @id @default(cuid())
   portfolioId String
-  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  date        String    // YYYY-MM-DD
+  date        String
   totalValue  Float
   totalCost   Float
   healthScore Float
-  data        String    // JSON with full portfolio state at this date
+  data        String
   createdAt   DateTime  @default(now())
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, date])
 }
 
-// ── Price Cache ───────────────────────────────────────────────────────────────
 model PriceCache {
   id        String   @id @default(cuid())
   symbol    String   @unique

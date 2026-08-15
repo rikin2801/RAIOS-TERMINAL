@@ -64,8 +64,10 @@ export function calculateStochastic(
   for (let i = kPeriod - 1; i < closes.length; i++) {
     const high = Math.max(...highs.slice(i - kPeriod + 1, i + 1));
     const low = Math.min(...lows.slice(i - kPeriod + 1, i + 1));
-    const k = high === low ? 50 : ((closes[i] - low) / (high - low)) * 100;
-    kValues.push(k);
+    // Clamp to [0,100]: ETF adjusted-close data can place close outside the
+    // unadjusted high-low range, producing physically impossible values.
+    const raw = high === low ? 50 : ((closes[i] - low) / (high - low)) * 100;
+    kValues.push(Math.min(100, Math.max(0, raw)));
   }
   const k = kValues[kValues.length - 1];
   const dSlice = kValues.slice(-dPeriod);
