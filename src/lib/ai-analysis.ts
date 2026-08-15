@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
-import type { AIAnalysisResult, TechnicalIndicators, FundamentalData, MarketQuote } from "@/types";
+import type { AIAnalysisResult, TechnicalIndicators, FundamentalData, MarketQuote, EntryScreenStep1, EntryScreenStep2, EntryScreenStep3 } from "@/types";
 import type { NewsItem } from "@/lib/news";
 import { formatNewsForPrompt } from "@/lib/news";
 import type { MultiTimeframeTrend } from "@/lib/trend-engine";
@@ -510,6 +510,177 @@ export async function runPhase1Analysis(params: {
     const isQuota = msg.includes("quota") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
     console.warn(`[phase1] Gemini error${isQuota ? " (quota)" : ""}, using fallback`);
     return getPhase1Fallback({ price: params.quote.price, trend: params.trend, businessHealth: params.businessHealth, priceAttractiveness: params.priceAttractiveness, analystTarget: params.analystTarget });
+  }
+}
+
+// ── Entry Screen Analysis ─────────────────────────────────────────────────────
+
+const EntryScreenGeminiSchema = z.object({
+  assessment:      z.enum(["ENTRY_CONFIRMED", "DEVELOPING", "NO_ENTRY"]),
+  entryPrice:      z.number().nullable(),
+  entryRangeHigh:  z.number().nullable(),
+  entryBasis:      z.string(),
+  stopLoss:        z.number().nullable(),
+  stopBasis:       z.string(),
+  target:          z.number().nullable(),
+  targetBasis:     z.string(),
+  bbSummary:       z.string(),
+  rsiSummary:      z.string(),
+  stochSummary:    z.string(),
+  emaSummary:      z.string(),
+  priceActionSummary: z.string(),
+  why:             z.array(z.string()).min(1).max(5),
+});
+
+function buildEntryScreenPrompt(params: {
+  symbol: string; name: string; price: number;
+  step1: EntryScreenStep1; step2: EntryScreenStep2; step3: EntryScreenStep3;
+}): string {
+  const { symbol, name, price, step1, step2, step3 } = params;
+  const s2 = step2;
+  const hourly = s2.hourly;
+
+  const trendLabel = step1.weeklyTrend === "UP" ? "UP / BULLISH" : step1.weeklyTrend === "DOWN" ? "DOWN / BEARISH" : "SIDEWAYS / UNCLEAR";
+  const bbLine = s2.bb
+    ? `Upper ₹${s2.bb.upper.toFixed(0)} | Middle ₹${s2.bb.middle.toFixed(0)} | Lower ₹${s2.bb.lower.toFixed(0)} | Bands turning: ${s2.bb.direction}`
+    : "DATA NOT AVAILABLE";
+  const hourlyLine = hourly
+    ? `RSI: ${hourly.rsi.toFixed(1)} | Stoch crossover: ${hourly.stochCrossover} | Stoch zone: ${hourly.stochZone} | MACD crossover: ${hourly.macdCrossover} | Aligns with daily: ${hourly.aligns ? "YES" : "NO"} | ${hourly.note}`
+    : "Hourly data: not available";
+
+  return `You are RAIOS Entry Point Analyzer. Analyze ${symbol} (${name}) for a technical entry point.
+
+CRITICAL RULES — READ BEFORE ANSWERING:
+1. All numbers below are server-computed from real price data. Do NOT invent or change any price, RSI, MACD, EMA, or Stochastic value.
+2. Entry, stop-loss, and target MUST be derived from the support/resistance/EMA levels provided — NOT from fixed percentage formulas.
+3. If the setup is inconclusive, say DEVELOPING or NO_ENTRY. Do NOT force an entry.
+4. Write summaries in plain English — no jargon, as if talking to an experienced retail investor.
+
+CURRENT PRICE: ₹${price.toFixed(0)}
+
+━━━ STEP 1 — WEEKLY CHART ━━━
+Weekly trend:   ${trendLabel}
+Evidence:       ${step1.weeklyTrendEvidence}
+Weekly MACD:    ${step1.macdCrossover} | Histogram: ${step1.macdHist >= 0 ? "+" : ""}${step1.macdHist.toFixed(3)} | Zone: ${step1.macdZone}
+Weekly Support: ₹${step1.support.toFixed(0)}
+Weekly Resistance: ₹${step1.resistance.toFixed(0)}
+
+━━━ STEP 2 — DAILY (LOWER TIMEFRAME) ━━━
+Bollinger Bands: ${bbLine}
+RSI (daily):     ${s2.rsi.currentRSI.toFixed(1)} | Key level: ${s2.rsi.nearestLevel} | Behavior: ${s2.rsi.action} | Reversal direction: ${s2.rsi.reversalDir}
+Stochastic:      K=${s2.stochastic.k.toFixed(1)}, D=${s2.stochastic.d.toFixed(1)} | Crossover: ${s2.stochastic.crossover} | Zone: ${s2.stochastic.zone}
+EMA Support:     EMA50=₹${s2.ema.ema50.toFixed(0)}, EMA100=₹${s2.ema.ema100.toFixed(0)}, EMA200=₹${s2.ema.ema200.toFixed(0)} | Status: ${s2.ema.status}
+EMA description: ${s2.ema.description}
+
+HOURLY CONFIRMATION: ${hourlyLine}
+
+━━━ STEP 3 — PRICE ACTION (DAILY CANDLES) ━━━
+Last candle pattern: ${step3.pattern}
+Direction:           ${step3.direction}
+Description:         ${step3.description}
+
+━━━ YOUR OUTPUT ━━━
+1. ASSESSMENT: ENTRY_CONFIRMED / DEVELOPING / NO_ENTRY
+   · ENTRY_CONFIRMED = weekly trend, daily indicators, AND price action all point the same direction with no major contradiction
+   · DEVELOPING = most signals align but at least one key confirmation is missing — be specific what needs to happen
+   · NO_ENTRY = signals are clearly conflicting or the setup is unfavorable
+
+2. ENTRY RANGE: Use the technical levels above (support, EMA, BB lower/middle). Return null if NO_ENTRY.
+
+3. STOP-LOSS: The technical level where this setup is invalidated (e.g. break below weekly support, break below EMA200). Use the actual level from above. Return null if NO_ENTRY.
+
+4. TARGET: The nearest meaningful resistance or technical target from the levels above. Return null if NO_ENTRY.
+
+5. SUMMARIES: One clear sentence each for BB, RSI, Stochastic, EMA, and price action — explain what each is showing specifically for this stock right now.
+
+6. WHY: Maximum 5 lines. Answer: "Is this a good technical entry NOW?" Use specific levels from above, not generic statements.`;
+}
+
+function getEntryScreenFallback(params: {
+  price: number; step1: EntryScreenStep1; step2: EntryScreenStep2; step3: EntryScreenStep3;
+}): z.infer<typeof EntryScreenGeminiSchema> {
+  const { price, step1, step2, step3 } = params;
+  const s2 = step2;
+
+  let bullScore = 0;
+  let bearScore = 0;
+
+  if (step1.weeklyTrend === "UP") bullScore += 2;
+  else if (step1.weeklyTrend === "DOWN") bearScore += 2;
+
+  if (step1.macdCrossover === "PCO") bullScore += 1;
+  else if (step1.macdCrossover === "NCO") bearScore += 1;
+
+  if (s2.rsi.reversalDir === "UP" || s2.rsi.action === "SUPPORT") bullScore += 1;
+  else if (s2.rsi.reversalDir === "DOWN" || s2.rsi.action === "RESISTANCE") bearScore += 1;
+
+  if (s2.stochastic.crossover === "PCO") bullScore += 1;
+  else if (s2.stochastic.crossover === "NCO") bearScore += 1;
+
+  if (s2.ema.status === "ABOVE_ALL" || s2.ema.status === "HOLDING_50") bullScore += 1;
+  else if (s2.ema.status === "BELOW_ALL") bearScore += 1;
+
+  if (step3.direction === "BULLISH") bullScore += 1;
+  else if (step3.direction === "BEARISH") bearScore += 1;
+
+  const net = bullScore - bearScore;
+  let assessment: "ENTRY_CONFIRMED" | "DEVELOPING" | "NO_ENTRY";
+  if (net >= 4) assessment = "ENTRY_CONFIRMED";
+  else if (net >= 2) assessment = "DEVELOPING";
+  else assessment = "NO_ENTRY";
+
+  const hasEntry = assessment !== "NO_ENTRY";
+  const ema50 = s2.ema.ema50;
+  const support = step1.support;
+  const resistance = step1.resistance;
+
+  const entryBase = hasEntry ? Math.max(ema50 > 0 ? ema50 : 0, support, price * 0.97) : null;
+  const entryHigh = hasEntry ? Math.min(price, price * 0.999) : null;
+
+  return {
+    assessment,
+    entryPrice: entryBase ? Math.round(entryBase) : null,
+    entryRangeHigh: entryHigh ? Math.round(entryHigh) : null,
+    entryBasis: hasEntry ? `Near key support ₹${support.toFixed(0)} / EMA zone` : "Setup not confirmed",
+    stopLoss: hasEntry ? Math.round(support * 0.985) : null,
+    stopBasis: hasEntry ? `Below weekly support ₹${support.toFixed(0)} — invalidates the setup` : "—",
+    target: hasEntry ? Math.round(resistance) : null,
+    targetBasis: hasEntry ? `Immediate weekly resistance ₹${resistance.toFixed(0)}` : "—",
+    bbSummary: s2.bb ? `Bollinger Bands are turning ${s2.bb.direction.toLowerCase()} — price is ${price > s2.bb.upper ? "above upper band (extended)" : price < s2.bb.lower ? "below lower band (potential reversal)" : "within the bands"}` : "Bollinger Band data not available",
+    rsiSummary: s2.rsi.description,
+    stochSummary: `Stochastic K=${s2.stochastic.k.toFixed(1)}, D=${s2.stochastic.d.toFixed(1)} — ${s2.stochastic.crossover !== "NONE" ? s2.stochastic.crossover + " in " + s2.stochastic.zone.toLowerCase() + " zone" : "no crossover — " + s2.stochastic.zone.toLowerCase() + " zone"}`,
+    emaSummary: s2.ema.description,
+    priceActionSummary: step3.description,
+    why: [
+      `Weekly trend is ${step1.weeklyTrend} — ${step1.weeklyTrendEvidence}`,
+      `Daily RSI at ${s2.rsi.currentRSI.toFixed(1)}: ${s2.rsi.description}`,
+      `Stochastic ${s2.stochastic.crossover !== "NONE" ? s2.stochastic.crossover : "no crossover"} from ${s2.stochastic.zone.toLowerCase()} zone`,
+      `Price ${s2.ema.status.toLowerCase().replace("_", " ")} — ${s2.ema.description}`,
+      `Price action: ${step3.pattern} (${step3.direction.toLowerCase()})`,
+    ].slice(0, 5),
+  };
+}
+
+export async function runEntryScreenAnalysis(params: {
+  symbol: string; name: string; price: number;
+  step1: EntryScreenStep1; step2: EntryScreenStep2; step3: EntryScreenStep3;
+}): Promise<z.infer<typeof EntryScreenGeminiSchema>> {
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!apiKey || apiKey === "your-gemini-api-key-here") {
+    return getEntryScreenFallback(params);
+  }
+  const google = createGoogleGenerativeAI({ apiKey });
+  try {
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: EntryScreenGeminiSchema,
+      prompt: buildEntryScreenPrompt(params),
+    });
+    return object;
+  } catch (err: unknown) {
+    const msg = String((err as { message?: string })?.message ?? "");
+    console.warn(`[entry-screen] Gemini error${msg.includes("429") ? " (quota)" : ""}, using fallback`);
+    return getEntryScreenFallback(params);
   }
 }
 

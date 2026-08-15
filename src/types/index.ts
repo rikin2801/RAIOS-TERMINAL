@@ -290,6 +290,65 @@ export interface Phase1AnalysisResult {
   pe: number | null;
 }
 
+// ── Entry Point Screening ─────────────────────────────────────────────────────
+
+export interface EntryScreenStep1 {
+  weeklyTrend: "UP" | "SIDEWAYS" | "DOWN";
+  weeklyTrendEvidence: string;
+  macdCrossover: "PCO" | "NCO" | "NONE";
+  macdZone: "OVERBOUGHT" | "OVERSOLD" | "NEUTRAL";
+  macdHist: number;
+  support: number;
+  resistance: number;
+}
+
+export interface EntryScreenStep2 {
+  bb: { upper: number; middle: number; lower: number; direction: "UP" | "DOWN" | "FLAT" } | null;
+  rsi: { currentRSI: number; nearestLevel: number; action: "SUPPORT" | "RESISTANCE" | "NONE"; reversalDir: "UP" | "DOWN" | "NONE"; description: string };
+  stochastic: { k: number; d: number; crossover: "PCO" | "NCO" | "NONE"; zone: "OVERBOUGHT" | "OVERSOLD" | "NEUTRAL" };
+  ema: { ema50: number; ema100: number; ema200: number; nearestEMA: 50 | 100 | 200 | null; status: string; description: string };
+  hourly: {
+    rsi: number;
+    stochCrossover: "PCO" | "NCO" | "NONE";
+    stochZone: "OVERBOUGHT" | "OVERSOLD" | "NEUTRAL";
+    macdCrossover: "PCO" | "NCO" | "NONE";
+    aligns: boolean;
+    note: string;
+  } | null;
+}
+
+export interface EntryScreenStep3 {
+  pattern: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  description: string;
+}
+
+export interface EntryScreenResult {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  step1: EntryScreenStep1;
+  step2: EntryScreenStep2;
+  step3: EntryScreenStep3;
+  // AI-determined outputs
+  assessment: "ENTRY_CONFIRMED" | "DEVELOPING" | "NO_ENTRY";
+  entryPrice: number | null;
+  entryRangeHigh: number | null;
+  entryBasis: string;
+  stopLoss: number | null;
+  stopBasis: string;
+  target: number | null;
+  targetBasis: string;
+  bbSummary: string;
+  rsiSummary: string;
+  stochSummary: string;
+  emaSummary: string;
+  priceActionSummary: string;
+  why: string[];
+}
+
 // ── Profit Booking Guidance ───────────────────────────────────────────────────
 
 export type ProfitBookingStatus = "LET_PROFITS_RUN" | "WATCH" | "ALERT" | "EXIT";
