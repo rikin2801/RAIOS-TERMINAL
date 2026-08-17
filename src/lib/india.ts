@@ -119,6 +119,9 @@ export const POPULAR_INDIAN_STOCKS = [
   // Power & Energy
   { symbol: "TATAPOWER",  name: "Tata Power Company", sector: "Power" },
   { symbol: "SUZLON",     name: "Suzlon Energy", sector: "Power" },
+  { symbol: "RPOWER",     name: "Reliance Power", sector: "Power" },
+  // Telecom / Tech
+  { symbol: "ONMOBILE",   name: "OnMobile Global", sector: "Technology" },
   // InvITs / REITs
   { symbol: "PGINVIT",    name: "PowerGrid Infrastructure InvIT", sector: "InvIT" },
   { symbol: "INDIGRID",   name: "India Grid Trust", sector: "InvIT" },
