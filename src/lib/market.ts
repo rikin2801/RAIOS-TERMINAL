@@ -55,9 +55,21 @@ export async function getQuote(symbol: string, exchange: Exchange = "NSE"): Prom
     // ── Yahoo Finance fallback ─────────────────────────────────────────────
     const yahooSymbol = toYahooSymbol(symbol, exchange);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const quote: any = await yf.quote(yahooSymbol, {}, { validateResult: false });
+    let quote: any = await yf.quote(yahooSymbol, {}, { validateResult: false });
     if (!quote || !quote.regularMarketPrice) {
       throw new Error(`No market data found for ${yahooSymbol}`);
+    }
+    // Yahoo Finance misclassifies Indian InvITs/REITs (e.g. PGINVIT.NS) as MUTUALFUND,
+    // serving a stale daily NAV instead of the live market price.
+    // Retry with the BSE suffix (.BO) — Yahoo has correct EQUITY data there.
+    if (quote.quoteType === "MUTUALFUND" && yahooSymbol.endsWith(".NS")) {
+      const bsoSymbol = `${symbol}.BO`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bsoQuote: any = await yf.quote(bsoSymbol, {}, { validateResult: false }).catch(() => null);
+      if (bsoQuote?.regularMarketPrice && bsoQuote.quoteType !== "MUTUALFUND") {
+        quote = bsoQuote;
+      }
+      // If BSE also fails or is also MUTUALFUND, fall through with whatever we have
     }
     const { symbol: cleanSymbol } = fromYahooSymbol(quote.symbol ?? yahooSymbol);
     // Yahoo returns corrupted shortName for InvITs/ETFs (e.g. "PGINVIT.NS,0P0001MGQ9,...")
@@ -114,12 +126,26 @@ export async function getHistoricalData(
 ) {
   const yahooSymbol = toYahooSymbol(symbol, exchange);
   const effectivePeriod = period === "1y" ? timeframeToPeriod(timeframe) : period;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result: any = await yf.chart(yahooSymbol, {
+  const chartOpts = {
     period1: getStartDate(effectivePeriod),
     period2: new Date(),
     interval: timeframeToInterval(timeframe),
-  }, { validateResult: false });
+  };
+
+  // Check if Yahoo classifies this as MUTUALFUND (affects InvITs like PGINVIT.NS)
+  // and fall back to the BSE ticker which Yahoo correctly treats as EQUITY.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let result: any = await yf.chart(yahooSymbol, chartOpts, { validateResult: false });
+  if (yahooSymbol.endsWith(".NS")) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const meta: any = result?.meta;
+    if (meta?.instrumentType === "MUTUALFUND" || meta?.quoteType === "MUTUALFUND") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bsoResult: any = await yf.chart(`${symbol}.BO`, chartOpts, { validateResult: false }).catch(() => null);
+      if (bsoResult?.quotes?.length) result = bsoResult;
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((result?.quotes ?? []) as any[]).map((q: any) => ({
     time: Math.floor(new Date(q.date).getTime() / 1000),
