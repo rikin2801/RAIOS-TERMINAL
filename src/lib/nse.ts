@@ -145,7 +145,7 @@ export async function getNSEQuote(symbol: string): Promise<NSEQuote> {
 let _indicesCache: { data: NSEIndex[]; ts: number } | null = null;
 const INDICES_TTL = 60_000;
 
-const WATCH_INDICES = new Set(["NIFTY 50", "NIFTY BANK", "NIFTY IT"]);
+const WATCH_INDICES = new Set(["NIFTY 50"]);
 
 export async function getNSEIndices(): Promise<NSEIndex[]> {
   if (_indicesCache && Date.now() - _indicesCache.ts < INDICES_TTL) {

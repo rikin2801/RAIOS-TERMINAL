@@ -1,6 +1,6 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketQuote } from "@/types";
-import { toYahooSymbol, fromYahooSymbol, type Exchange } from "./india";
+import { toYahooSymbol, fromYahooSymbol, POPULAR_INDIAN_STOCKS, type Exchange } from "./india";
 import { getNSEQuote } from "./nse";
 import {
   calculateRSI, calculateMACD, calculateStochastic,
@@ -60,9 +60,14 @@ export async function getQuote(symbol: string, exchange: Exchange = "NSE"): Prom
       throw new Error(`No market data found for ${yahooSymbol}`);
     }
     const { symbol: cleanSymbol } = fromYahooSymbol(quote.symbol ?? yahooSymbol);
+    // Yahoo returns corrupted shortName for InvITs/ETFs (e.g. "PGINVIT.NS,0P0001MGQ9,...")
+    // Fall back to the known name from india.ts, then to the raw symbol.
+    const rawName = quote.longName ?? quote.shortName ?? "";
+    const knownName = POPULAR_INDIAN_STOCKS.find((s) => s.symbol === cleanSymbol)?.name;
+    const name = knownName ?? (rawName && !rawName.includes(",") ? rawName : cleanSymbol);
     const result: MarketQuote = {
       symbol: cleanSymbol,
-      name: quote.longName ?? quote.shortName ?? symbol,
+      name,
       price: quote.regularMarketPrice ?? 0,
       open: quote.regularMarketOpen ?? 0,
       high: quote.regularMarketDayHigh ?? 0,
