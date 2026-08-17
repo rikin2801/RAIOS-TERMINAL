@@ -45,15 +45,30 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   // Import holdings
   if (parseResult.holdings?.length) {
     for (const h of parseResult.holdings) {
-      if (skipDuplicates) {
-        const exists = await prisma.holding.findFirst({
-          where: { portfolioId, symbol: h.symbol },
-        });
-        if (exists) {
-          importWarnings.push(`${h.symbol}: Already exists in portfolio — skipped. Edit manually to update.`);
-          continue;
-        }
+      // Always clean up stale entries: same name, different (old/wrong) symbol
+      const staleDupe = await prisma.holding.findFirst({
+        where: {
+          portfolioId,
+          name: { equals: h.name, mode: "insensitive" },
+          symbol: { not: h.symbol },
+        },
+      });
+      if (staleDupe) {
+        await prisma.holding.delete({ where: { id: staleDupe.id } });
+        importWarnings.push(`${staleDupe.symbol} → ${h.symbol}: Replaced stale symbol for "${h.name}".`);
       }
+
+      // Check for exact symbol duplicate (after stale cleanup)
+      const exactDupe = await prisma.holding.findFirst({
+        where: { portfolioId, symbol: h.symbol },
+      });
+      if (exactDupe) {
+        if (skipDuplicates) {
+          importWarnings.push(`${h.symbol}: Already exists in portfolio — skipped. Edit manually to update.`);
+        }
+        continue;
+      }
+
       await prisma.holding.create({
         data: {
           portfolioId,

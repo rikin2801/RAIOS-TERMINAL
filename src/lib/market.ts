@@ -56,20 +56,25 @@ export async function getQuote(symbol: string, exchange: Exchange = "NSE"): Prom
     const yahooSymbol = toYahooSymbol(symbol, exchange);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let quote: any = await yf.quote(yahooSymbol, {}, { validateResult: false });
+
+    // If .NS returns no price (rate-limited on cloud/Vercel, or MUTUALFUND misclassification),
+    // retry with the BSE (.BO) equivalent which is often unaffected.
+    const needsBSEFallback =
+      !quote?.regularMarketPrice ||
+      (quote.quoteType === "MUTUALFUND" && yahooSymbol.endsWith(".NS"));
+    if (needsBSEFallback && yahooSymbol.endsWith(".NS")) {
+      // Use the original symbol (not yahooSymbol base) so overrides like RIIT→RIIT-IV.NS
+      // fall back to RIIT.BO rather than the non-existent RIIT-IV.BO.
+      const boSymbol = `${symbol.toUpperCase().trim()}.BO`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const boQuote: any = await yf.quote(boSymbol, {}, { validateResult: false }).catch(() => null);
+      if (boQuote?.regularMarketPrice && boQuote.quoteType !== "MUTUALFUND") {
+        quote = boQuote;
+      }
+    }
+
     if (!quote || !quote.regularMarketPrice) {
       throw new Error(`No market data found for ${yahooSymbol}`);
-    }
-    // Yahoo Finance misclassifies Indian InvITs/REITs (e.g. PGINVIT.NS) as MUTUALFUND,
-    // serving a stale daily NAV instead of the live market price.
-    // Retry with the BSE suffix (.BO) — Yahoo has correct EQUITY data there.
-    if (quote.quoteType === "MUTUALFUND" && yahooSymbol.endsWith(".NS")) {
-      const bsoSymbol = `${symbol}.BO`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bsoQuote: any = await yf.quote(bsoSymbol, {}, { validateResult: false }).catch(() => null);
-      if (bsoQuote?.regularMarketPrice && bsoQuote.quoteType !== "MUTUALFUND") {
-        quote = bsoQuote;
-      }
-      // If BSE also fails or is also MUTUALFUND, fall through with whatever we have
     }
     const { symbol: cleanSymbol } = fromYahooSymbol(quote.symbol ?? yahooSymbol);
     // Yahoo returns corrupted shortName for InvITs/ETFs (e.g. "PGINVIT.NS,0P0001MGQ9,...")

@@ -4,7 +4,8 @@ export type Exchange = "NSE" | "BSE";
 
 // Yahoo Finance uses non-standard NSE tickers for some InvITs/REITs
 const NSE_YAHOO_OVERRIDES: Record<string, string> = {
-  "RIIT": "RIIT-IV.NS", // Raajmarg Infra InvIT — NSE lists as RIIT-IV on Yahoo
+  "RIIT": "RIIT-IV.NS",    // Raajmarg Infra InvIT — NSE lists as RIIT-IV on Yahoo
+  "BAGMANE-RR": "BAGMANE.BO", // Bagmane Prime Office REIT — BSE ticker is BAGMANE.BO (not BAGMANE-RR.BO)
 };
 
 export function toYahooSymbol(symbol: string, exchange: Exchange = "NSE"): string {
