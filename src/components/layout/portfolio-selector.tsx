@@ -43,14 +43,12 @@ function PortfolioRow({
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {active && <Check className="h-3 w-3 text-primary" />}
-        {!p.isDefault && (
-          <button
-            onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        )}
+        <button
+          onClick={onDelete}
+          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
       </div>
     </div>
   );

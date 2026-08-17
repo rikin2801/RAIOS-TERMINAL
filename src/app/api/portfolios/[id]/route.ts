@@ -49,6 +49,12 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
   if (count <= 1) {
     return NextResponse.json({ error: "Cannot delete the only portfolio" }, { status: 400 });
   }
+  // If this is the default portfolio, promote the next one
+  const target = await prisma.portfolio.findUnique({ where: { id } });
+  if (target?.isDefault) {
+    const next = await prisma.portfolio.findFirst({ where: { id: { not: id } }, orderBy: { createdAt: "asc" } });
+    if (next) await prisma.portfolio.update({ where: { id: next.id }, data: { isDefault: true } });
+  }
   await prisma.portfolio.delete({ where: { id } });
   return NextResponse.json({ success: true });
 }
