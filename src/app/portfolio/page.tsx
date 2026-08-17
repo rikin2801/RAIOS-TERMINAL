@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HoldingForm } from "@/components/portfolio/holding-form";
 import { useToast } from "@/hooks/use-toast";
-import { usePortfolio, ALL_PORTFOLIOS_ID } from "@/contexts/portfolio-context";
+import { usePortfolio, ALL_PORTFOLIOS_ID, FAMILY_PREFIX, BROKER_PREFIX } from "@/contexts/portfolio-context";
 import { formatCurrency, formatCurrencyCompact, formatPercent } from "@/lib/utils";
 import type { Holding, HoldingWithMarket, ImportHistory } from "@/types";
 import {
@@ -37,6 +37,13 @@ interface AISignal {
   indicators?: { rsi: number; trend: string; macdHistogram: number; sma50: number; sma200: number };
 }
 
+interface SubHolding {
+  portfolioId: string;
+  portfolioName: string;
+  shares: number;
+  avgCost: number;
+}
+
 const signalColors = {
   BUY: "text-green-400 bg-green-400/10 border-green-400/30",
   HOLD: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
@@ -44,8 +51,10 @@ const signalColors = {
 };
 
 export default function PortfolioPage() {
-  const { activePortfolioId, activePortfolio, refreshPortfolios } = usePortfolio();
+  const { activePortfolioId, activePortfolio, portfolios, refreshPortfolios } = usePortfolio();
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [subHoldings, setSubHoldings] = useState<Record<string, SubHolding[]>>({});
+  const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number; changePercent: number }>>({});
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -64,36 +73,49 @@ export default function PortfolioPage() {
   const { toast } = useToast();
   const brokerFileRef = useRef<HTMLInputElement>(null);
 
+  const isVirtual = activePortfolioId === ALL_PORTFOLIOS_ID ||
+    (activePortfolioId?.startsWith(FAMILY_PREFIX) ?? false) ||
+    (activePortfolioId?.startsWith(BROKER_PREFIX) ?? false);
+
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
     try {
-      if (activePortfolioId === ALL_PORTFOLIOS_ID) {
-        // Fetch all holdings across every portfolio and merge duplicates by weighted avg cost
-        const res = await fetch("/api/holdings?portfolioId=__ALL__");
+      if (isVirtual) {
+        // For all combined views: merge duplicates by weighted avg cost and track breakdown
+        const paramId = activePortfolioId === ALL_PORTFOLIOS_ID ? "__ALL__" : activePortfolioId ?? "";
+        const res = await fetch(`/api/holdings?portfolioId=${encodeURIComponent(paramId)}`);
         const all: Holding[] = await res.json();
         const merged = new Map<string, Holding>();
+        const subsMap = new Map<string, SubHolding[]>();
         for (const h of all) {
+          const pName = portfolios.find((p) => p.id === h.portfolioId)?.name ?? h.portfolioId ?? "Unknown";
+          const sub: SubHolding = { portfolioId: h.portfolioId ?? "", portfolioName: pName, shares: h.shares, avgCost: h.avgCost };
           const existing = merged.get(h.symbol);
           if (!existing) {
             merged.set(h.symbol, { ...h });
+            subsMap.set(h.symbol, [sub]);
           } else {
             const totalShares = existing.shares + h.shares;
             const avgCost = (existing.avgCost * existing.shares + h.avgCost * h.shares) / totalShares;
             merged.set(h.symbol, { ...existing, shares: totalShares, avgCost });
+            subsMap.get(h.symbol)!.push(sub);
           }
         }
         setHoldings(Array.from(merged.values()));
+        setSubHoldings(Object.fromEntries(subsMap));
       } else {
         const pid = activePortfolioId ?? "";
         const url = pid ? `/api/holdings?portfolioId=${pid}` : "/api/holdings";
         const res = await fetch(url);
         const data = await res.json();
         setHoldings(data);
+        setSubHoldings({});
       }
+      setExpandedSubs({});
     } finally {
       setLoading(false);
     }
-  }, [activePortfolioId]);
+  }, [activePortfolioId, isVirtual, portfolios]);
 
   const fetchImportHistory = useCallback(async () => {
     if (!activePortfolioId) return;
@@ -578,7 +600,7 @@ export default function PortfolioPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border pb-0">
-        {(activePortfolioId === ALL_PORTFOLIOS_ID
+        {(isVirtual
           ? ["holdings"] as const
           : ["holdings", "import", "history"] as const
         ).map((tab) => (
@@ -598,7 +620,7 @@ export default function PortfolioPage() {
             ) : "Holdings"}
           </button>
         ))}
-        {activePortfolioId === ALL_PORTFOLIOS_ID && (
+        {isVirtual && (
           <span className="ml-auto self-center text-[10px] text-muted-foreground px-2">
             Read-only · duplicate stocks merged by weighted avg cost
           </span>
@@ -636,10 +658,22 @@ export default function PortfolioPage() {
                     const ai = aiSignals[h.symbol];
                     const isAnalyzing = analyzingSymbol === h.symbol;
                     const expanded = expandedAI[h.symbol];
+                    const subs = subHoldings[h.symbol];
+                    const hasBreakdown = isVirtual && subs && subs.length > 1;
+                    const subExpanded = expandedSubs[h.symbol];
                     const rows = [
                       <tr key={h.id}>
                         <td>
                           <div className="flex items-center gap-1">
+                            {hasBreakdown && (
+                              <button
+                                onClick={() => setExpandedSubs((prev) => ({ ...prev, [h.symbol]: !prev[h.symbol] }))}
+                                className="text-muted-foreground hover:text-primary transition-colors"
+                                title="Show per-portfolio breakdown"
+                              >
+                                {subExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => setChartSymbol({ symbol: h.symbol, exchange: h.exchange ?? "NSE", name: h.name })}
                               className="font-mono font-semibold text-primary hover:underline cursor-pointer"
@@ -687,7 +721,7 @@ export default function PortfolioPage() {
                           {h.sector && <Badge variant="outline" className="text-xs">{h.sector}</Badge>}
                         </td>
                         <td className="text-right">
-                          {activePortfolioId !== ALL_PORTFOLIOS_ID && (
+                          {!isVirtual && (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditTarget(h)}>
                                 <Pencil className="h-3 w-3" />
@@ -700,6 +734,50 @@ export default function PortfolioPage() {
                         </td>
                       </tr>,
                     ];
+                    // Sub-portfolio breakdown row
+                    if (hasBreakdown && subExpanded) {
+                      const livePrice = quotes[h.symbol]?.price;
+                      rows.push(
+                        <tr key={`${h.id}-subs`} className="bg-accent/30">
+                          <td colSpan={12} className="px-4 py-2">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-muted-foreground">
+                                  <th className="text-left pb-1 font-medium">Portfolio</th>
+                                  <th className="text-right pb-1 font-medium">Shares</th>
+                                  <th className="text-right pb-1 font-medium">Avg Cost</th>
+                                  <th className="text-right pb-1 font-medium">Cost Basis</th>
+                                  {livePrice && <th className="text-right pb-1 font-medium">Current Value</th>}
+                                  {livePrice && <th className="text-right pb-1 font-medium">G/L</th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {subs.map((s, idx) => {
+                                  const costBasis = s.shares * s.avgCost;
+                                  const curVal = livePrice ? livePrice * s.shares : null;
+                                  const gl = curVal != null ? curVal - costBasis : null;
+                                  const glPct = gl != null && costBasis > 0 ? (gl / costBasis) * 100 : null;
+                                  return (
+                                    <tr key={idx} className="border-t border-border/40">
+                                      <td className="py-1 font-medium text-foreground">{s.portfolioName}</td>
+                                      <td className="text-right font-mono">{s.shares.toFixed(2)}</td>
+                                      <td className="text-right font-mono">{formatCurrency(s.avgCost)}</td>
+                                      <td className="text-right font-mono">{formatCurrencyCompact(costBasis)}</td>
+                                      {livePrice && <td className="text-right font-mono">{curVal != null ? formatCurrencyCompact(curVal) : "—"}</td>}
+                                      {livePrice && (
+                                        <td className={`text-right font-mono ${gl != null && gl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                          {gl != null ? `${gl >= 0 ? "+" : ""}${formatCurrencyCompact(gl)} (${glPct?.toFixed(1)}%)` : "—"}
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      );
+                    }
                     if (ai && expanded) {
                       rows.push(
                         <tr key={`${h.id}-ai`} className="bg-secondary/20">
