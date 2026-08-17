@@ -31,6 +31,9 @@ export const POPULAR_INDIAN_STOCKS = [
   { symbol: "ASIANPAINT", name: "Asian Paints", sector: "Paints" },
   { symbol: "MARUTI", name: "Maruti Suzuki", sector: "Auto" },
   { symbol: "SUNPHARMA", name: "Sun Pharma", sector: "Pharma" },
+  // Tata Motors split in 2024: TATAMOTORS → TMCV (CV) + TMPV (PV)
+  { symbol: "TMCV",       name: "Tata Motors Ltd (Commercial Vehicles)", sector: "Auto" },
+  { symbol: "TMPV",       name: "Tata Motors Passenger Vehicles", sector: "Auto" },
   { symbol: "TATAMOTORS", name: "Tata Motors", sector: "Auto" },
   { symbol: "WIPRO", name: "Wipro", sector: "IT" },
   { symbol: "ULTRACEMCO", name: "UltraTech Cement", sector: "Cement" },

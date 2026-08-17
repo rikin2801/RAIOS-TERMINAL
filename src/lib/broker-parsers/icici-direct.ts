@@ -3,9 +3,13 @@ import type { ParseResult, ParsedHolding } from "./types";
 // ICICI Direct uses short proprietary codes — this map covers common NSE stocks
 // Format: ICICI_CODE → NSE_SYMBOL
 const ICICI_TO_NSE: Record<string, string> = {
-  // Auto
-  ASHLEY: "ASHOKLEY", TATCOV: "TATAMOTORS", TMCV: "TATAMOTORS",
-  TATMOT: "TATAMOTORS",
+  // Auto — after the 2024 Tata Motors demerger, TATAMOTORS split into:
+  //   TMCV  = Tata Motors Ltd (Commercial Vehicles) — NSE symbol TMCV
+  //   TMPV  = Tata Motors Passenger Vehicles Ltd   — NSE symbol TMPV
+  ASHLEY: "ASHOKLEY",
+  TATCOV: "TMCV",   // ICICI "Tata Motors CV" → TMCV.NS
+  TMCV:   "TMCV",   // ICICI code same as NSE symbol (pass-through)
+  TATMOT: "TMPV",   // ICICI "Tata Motors Pax Vehicles" → TMPV.NS
   MARUTI: "MARUTI", BAJAJ: "BAJAJ-AUTO", HERO: "HEROMOTOCO",
   EICHER: "EICHERMOT",
   // Banking
