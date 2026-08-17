@@ -2,9 +2,15 @@
 
 export type Exchange = "NSE" | "BSE";
 
+// Yahoo Finance uses non-standard NSE tickers for some InvITs/REITs
+const NSE_YAHOO_OVERRIDES: Record<string, string> = {
+  "RIIT": "RIIT-IV.NS", // Raajmarg Infra InvIT — NSE lists as RIIT-IV on Yahoo
+};
+
 export function toYahooSymbol(symbol: string, exchange: Exchange = "NSE"): string {
   const clean = symbol.toUpperCase().trim();
   if (clean.endsWith(".NS") || clean.endsWith(".BO")) return clean;
+  if (exchange === "NSE" && NSE_YAHOO_OVERRIDES[clean]) return NSE_YAHOO_OVERRIDES[clean];
   return exchange === "BSE" ? `${clean}.BO` : `${clean}.NS`;
 }
 
@@ -130,12 +136,13 @@ export const POPULAR_INDIAN_STOCKS = [
   { symbol: "INDIGRID",   name: "India Grid Trust", sector: "InvIT" },
   { symbol: "EMBASSY",    name: "Embassy Office Parks REIT", sector: "REIT" },
   { symbol: "MINDSPACE",  name: "Mindspace Business Parks REIT", sector: "REIT" },
+  { symbol: "BAGMANE-RR", name: "Bagmane Prime Office REIT", sector: "REIT" },
+  { symbol: "BIRET",      name: "Brookfield India Real Estate Trust", sector: "REIT" },
   // Consumer / Tech
   { symbol: "IDEA",       name: "Vodafone Idea", sector: "Telecom" },
   { symbol: "AMARAJABAT", name: "Amara Raja Energy & Mobility", sector: "Auto Ancillary" },
   { symbol: "EXIDEIND",   name: "Exide Industries", sector: "Auto Ancillary" },
   // Additional stocks
-  { symbol: "TMCV", name: "Tata Motors CV (TMCV)", sector: "Auto" },
   { symbol: "RIIT", name: "Raajmarg Infra Investment Trust", sector: "Infrastructure" },
 ];
 
