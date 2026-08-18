@@ -84,12 +84,40 @@ export async function GET(
     const wHighs  = weeklyCandles.map(c => c.high);
     const wLows   = weeklyCandles.map(c => c.low);
 
+    // Compute EMA early — used to expand S/R when cluster levels collapse onto current price
+    const emaDaily = classifyEMASupport(price, dCloses);
+    const srStep   = price > 500 ? 10 : price > 100 ? 5 : 1;
+
     // ── STEP 1 — Weekly ─────────────────────────────────────────────────────
     const { trend: weeklyTrend, evidence: weeklyEvidence } = weeklyTrendLabel(weeklyCandles);
     const wMACDCrossover = weeklyCandles.length >= 28 ? detectMACDCrossover(wCloses) : "NONE";
     const { histogram: wMACDHist } = wCloses.length >= 26 ? calculateMACD(wCloses) : { histogram: 0 };
     const wMACDZone = macdZone(wMACDHist, wCloses.length >= 14 ? wCloses : dCloses);
-    const weeklyDailySR = computeClusteredSupportResistance(weeklyCandles.length >= 10 ? weeklyCandles : dailyCandles);
+
+    let { support: srSupport, resistance: srResistance } = computeClusteredSupportResistance(
+      weeklyCandles.length >= 10 ? weeklyCandles : dailyCandles
+    );
+
+    // If cluster support is within 5% of price (e.g. stock consolidating at support),
+    // use the nearest EMA below price as the actionable support zone instead.
+    // This gives a real "buy on pullback" level (e.g. EMA50 at ₹162) rather than ₹175 = current price.
+    if (srSupport > price * 0.95) {
+      const emaBelow = [emaDaily.ema50, emaDaily.ema100, emaDaily.ema200]
+        .filter(e => e > 0 && e < price * 0.95)
+        .sort((a, b) => b - a)[0];
+      if (emaBelow) srSupport = Math.round(emaBelow);
+    }
+
+    // If cluster resistance is within 5% of price, use the nearest real swing high from candles.
+    if (srResistance < price * 1.05) {
+      const swingHighs = [
+        ...weeklyCandles.slice(-20).map(c => c.high),
+        ...dailyCandles.slice(-60).map(c => c.high),
+      ].filter(h => h > price * 1.04).sort((a, b) => a - b);
+      srResistance = swingHighs.length > 0
+        ? Math.round(swingHighs[0] / srStep) * srStep
+        : Math.round(price * 1.08 / srStep) * srStep;
+    }
 
     const step1: EntryScreenStep1 = {
       weeklyTrend,
@@ -97,15 +125,15 @@ export async function GET(
       macdCrossover: wMACDCrossover,
       macdZone: wMACDZone,
       macdHist: wMACDHist,
-      support: weeklyDailySR.support,
-      resistance: weeklyDailySR.resistance,
+      support: srSupport,
+      resistance: srResistance,
     };
 
     // ── STEP 2 — Daily (lower timeframe) ────────────────────────────────────
     const bbDaily    = calculateBollingerBandsValue(dCloses);
     const rsiDaily   = analyzeRSILevel(dCloses);
     const stochDaily = detectStochasticCrossover(dHighs, dLows, dCloses);
-    const emaDaily   = classifyEMASupport(price, dCloses);
+    // emaDaily already computed above
 
     // Hourly confirmation
     let hourlyConf: EntryScreenStep2["hourly"] = null;
