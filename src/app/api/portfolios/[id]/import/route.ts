@@ -45,14 +45,15 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   // Import holdings
   if (parseResult.holdings?.length) {
     for (const h of parseResult.holdings) {
-      // Always clean up stale entries: same name, different (old/wrong) symbol
-      const staleDupe = await prisma.holding.findFirst({
-        where: {
-          portfolioId,
-          name: { equals: h.name, mode: "insensitive" },
-          symbol: { not: h.symbol },
-        },
+      // Always clean up stale entries: same name (case-insensitive), different (old/wrong) symbol.
+      // SQLite has no server-side insensitive filter, so we fetch candidates and compare in JS.
+      const nameCandidates = await prisma.holding.findMany({
+        where: { portfolioId, symbol: { not: h.symbol } },
+        select: { id: true, name: true, symbol: true },
       });
+      const staleDupe = nameCandidates.find(
+        c => c.name.toLowerCase() === h.name.toLowerCase()
+      );
       if (staleDupe) {
         await prisma.holding.delete({ where: { id: staleDupe.id } });
         importWarnings.push(`${staleDupe.symbol} → ${h.symbol}: Replaced stale symbol for "${h.name}".`);
