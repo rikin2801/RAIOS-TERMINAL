@@ -613,11 +613,16 @@ Description:         ${step3.description}
    · DEVELOPING = most signals align but at least one key confirmation is missing — be specific what needs to happen
    · NO_ENTRY = signals are clearly conflicting or the setup is unfavorable
 
-2. ENTRY RANGE: Use the technical levels above (support, EMA, BB lower/middle). Return null if NO_ENTRY.
+2. ENTRY RANGE: This is a LIMIT ORDER zone — a range where a trader would place buy orders in advance.
+   - entryPrice (low) = meaningful support level (weekly support, key EMA, or BB lower band)
+   - entryRangeHigh (high) = 2–4% ABOVE entryPrice, and ALWAYS at least 1% BELOW current price
+   - Minimum width: entryRangeHigh must be at least 1% higher than entryPrice
+   - Never set entryRangeHigh equal to the current price or above it
+   - Return null for both if NO_ENTRY
 
-3. STOP-LOSS: The technical level where this setup is invalidated (e.g. break below weekly support, break below EMA200). Use the actual level from above. Return null if NO_ENTRY.
+3. STOP-LOSS: The technical level where this setup is invalidated (e.g. break below weekly support, break below EMA200). Use the actual level from above. Must be BELOW entryPrice. Return null if NO_ENTRY.
 
-4. TARGET: The nearest meaningful resistance or technical target from the levels above. Return null if NO_ENTRY.
+4. TARGET: The nearest meaningful resistance or technical target from the levels above. Must be at least 5% above entryRangeHigh for a worthwhile risk-reward. Return null if NO_ENTRY.
 
 5. SUMMARIES: One clear sentence each for BB, RSI, Stochastic, EMA, and price action — explain what each is showing specifically for this stock right now.
 
@@ -662,13 +667,23 @@ function getEntryScreenFallback(params: {
   const support = step1.support;
   const resistance = step1.resistance;
 
-  const entryBase = hasEntry ? Math.max(ema50 > 0 ? ema50 : 0, support, price * 0.97) : null;
-  const entryHigh = hasEntry ? Math.min(price, price * 0.999) : null;
+  // Entry zone: limit-order area at or near the support level.
+  // Low = support; High = whichever is lower of (EMA50 if it's between support and price, else support + 2%).
+  // Always cap below current price so the zone represents a buy-on-pullback range.
+  let entryLow: number | null = null;
+  let entryHigh: number | null = null;
+  if (hasEntry) {
+    entryLow = Math.round(support);
+    const ema50Candidate = ema50 > 0 && ema50 > support && ema50 < price * 0.99 ? ema50 : support * 1.02;
+    entryHigh = Math.round(Math.min(ema50Candidate, price * 0.99));
+    // Ensure the zone has at least a small spread (step ≈ 1%)
+    if (entryHigh <= entryLow) entryHigh = Math.round(entryLow * 1.01);
+  }
 
   return {
     assessment,
-    entryPrice: entryBase ? Math.round(entryBase) : null,
-    entryRangeHigh: entryHigh ? Math.round(entryHigh) : null,
+    entryPrice: entryLow,
+    entryRangeHigh: entryHigh,
     entryBasis: hasEntry ? `Near key support ₹${support.toFixed(0)} / EMA zone` : "Setup not confirmed",
     stopLoss: hasEntry ? Math.round(support * 0.985) : null,
     stopBasis: hasEntry ? `Below weekly support ₹${support.toFixed(0)} — invalidates the setup` : "—",

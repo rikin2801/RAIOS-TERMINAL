@@ -216,7 +216,6 @@ export function computeClusteredSupportResistance(
   const recent = candles.slice(-60);
   const price = candles[candles.length - 1].close;
 
-  // Cluster all pivot levels (round to nearest ₹10 for large-cap NSE stocks)
   const step = price > 500 ? 10 : price > 100 ? 5 : 1;
   const allLevels = [...recent.map((c) => c.high), ...recent.map((c) => c.low)].map(
     (p) => Math.round(p / step) * step
@@ -226,16 +225,21 @@ export function computeClusteredSupportResistance(
 
   const sorted = Object.entries(freq)
     .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .slice(0, 12)
+    .slice(0, 20)
     .map((e) => Number(e[0]));
 
-  const supports = sorted.filter((p) => p < price);
-  const resistances = sorted.filter((p) => p > price);
+  // Prefer levels at least 3% away from current price so S/R are actionable,
+  // not just the nearest candle wick when the stock is in a tight range.
+  const minDist = price * 0.03;
+  const suppCandidates  = sorted.filter(p => p < price - minDist).sort((a, b) => b - a);
+  const resCandidates   = sorted.filter(p => p > price + minDist).sort((a, b) => a - b);
 
-  // If no swing resistance found (near ATH), use 52W high or simple step up
-  const rawResistance = resistances.length > 0 ? Math.min(...resistances) : Infinity;
-  const resistance = isFinite(rawResistance) ? rawResistance : Math.round(price * 1.05 / step) * step;
-  const support = supports.length > 0 ? Math.max(...supports) : Math.round(price * 0.95 / step) * step;
+  // Fallback: any level below/above if no candidate meets the 3% floor
+  const anyBelow = sorted.filter(p => p < price).sort((a, b) => b - a);
+  const anyAbove = sorted.filter(p => p > price).sort((a, b) => a - b);
+
+  const support    = suppCandidates[0]  ?? anyBelow[0]  ?? Math.round(price * 0.95 / step) * step;
+  const resistance = resCandidates[0]   ?? anyAbove[0]  ?? Math.round(price * 1.05 / step) * step;
 
   return { support, resistance };
 }
